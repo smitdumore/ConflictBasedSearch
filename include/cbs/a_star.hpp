@@ -48,8 +48,7 @@ purposes.
     \tparam StateHasher A class to convert a state to a hash value. Default:
    std::hash<State>
 */
-template <typename State, typename Action, typename Cost, typename Environment,
-          typename StateHasher = std::hash<State> >
+template <typename State, typename Action, typename Cost, typename Environment, typename StateHasher = std::hash<State>>
 class AStar {
 
     public:
@@ -68,43 +67,51 @@ class AStar {
             solution.cost = 0;
 
             // priority queue
-            openSet_t openSet;
+            boost::heap::fibonacci_heap<Node> openSet;
 
-            // ?
-            std::unordered_map<State, fibHeapHandle_t, StateHasher> stateToHeap;
+            // Maps states to position in the priority queue
+            // State -> state_key (state hasher provides hash function for the map)
+            std::unordered_map<State, stateKeyInHeap_t, StateHasher> stateToHeap;
             
-            // visited
+            // Visited
             std::unordered_set<State, StateHasher> closedSet;
             
             // keeps track of parent (helpful for backtracking the path)
             std::unordered_map<State, std::tuple<State, Action, Cost, Cost>, StateHasher> cameFrom;
 
             // Node is a struct that goes into the priority queue
+            // Adding Start Node to the priority queue (Node instance is created in place)
             auto handle = openSet.push( Node(startState, m_env.admissibleHeuristic(startState), initialCost) );
             
+            // store handle of current node in the heap, so that we can directly edit it using the handle
             stateToHeap.insert(std::make_pair<>(startState, handle));
             (*handle).handle = handle;
-
+            
+            // This will store neighbors in the future
             std::vector<Neighbor<State, Action, Cost> > neighbors;
             neighbors.reserve(10);
+
 
             while (!openSet.empty()) {
                 
                 Node current = openSet.top();
-                m_env.onExpandNode(current.state, current.fScore, current.gScore);
+                m_env.onExpandNode(current.state, current.fScore, current.gScore); // ?
 
                 // check if search reached the goal ?
                 if (m_env.isSolution(current.state)) {
                     solution.states.clear();
                     solution.actions.clear();
                     auto iter = cameFrom.find(current.state);
+
+                    // backtracking
                     while (iter != cameFrom.end()) {
-                    solution.states.push_back(
-                        std::make_pair<>(iter->first, std::get<3>(iter->second)));
-                    solution.actions.push_back(std::make_pair<>(
-                        std::get<1>(iter->second), std::get<2>(iter->second)));
-                    iter = cameFrom.find(std::get<0>(iter->second));
+                        solution.states.push_back(
+                            std::make_pair<>(iter->first, std::get<3>(iter->second)));
+                        solution.actions.push_back(std::make_pair<>(
+                            std::get<1>(iter->second), std::get<2>(iter->second)));
+                        iter = cameFrom.find(std::get<0>(iter->second));
                     }
+
                     solution.states.push_back(std::make_pair<>(startState, initialCost));
                     std::reverse(solution.states.begin(), solution.states.end());
                     std::reverse(solution.actions.begin(), solution.actions.end());
@@ -115,53 +122,61 @@ class AStar {
                 }
 
                 openSet.pop();
-                stateToHeap.erase(current.state);
-                closedSet.insert(current.state);
+                closedSet.insert(current.state); // visited
+                stateToHeap.erase(current.state); // Its closed so we don't need to keep track of it in heap
+               
 
                 // traverse neighbors
                 neighbors.clear();
                 m_env.getNeighbors(current.state, neighbors);
+
                 for (const Neighbor<State, Action, Cost>& neighbor : neighbors) {
+
+                    // if neigbor node not visited
                     if (closedSet.find(neighbor.state) == closedSet.end()) {
-                    Cost tentative_gScore = current.gScore + neighbor.cost;
-                    auto iter = stateToHeap.find(neighbor.state);
-                    if (iter == stateToHeap.end()) {  // Discover a new node
-                        Cost fScore =
-                            tentative_gScore + m_env.admissibleHeuristic(neighbor.state);
-                        auto handle =
-                            openSet.push(Node(neighbor.state, fScore, tentative_gScore));
-                        (*handle).handle = handle;
-                        stateToHeap.insert(std::make_pair<>(neighbor.state, handle));
-                        m_env.onDiscover(neighbor.state, fScore, tentative_gScore);
-                        // std::cout << "  this is a new node " << fScore << "," <<
-                        // tentative_gScore << std::endl;
-                    } else {
-                        auto handle = iter->second;
-                        // std::cout << "  this is an old node: " << tentative_gScore << ","
-                        // << (*handle).gScore << std::endl;
-                        // We found this node before with a better path
-                        if (tentative_gScore >= (*handle).gScore) {
-                        continue;
+                        
+                        Cost tentative_gScore = current.gScore + neighbor.cost;
+                        auto iter = stateToHeap.find(neighbor.state); // find neighbor in heap 
+                        
+                        if (iter == stateToHeap.end()) {  // Discover a new node
+                            Cost fScore =
+                                tentative_gScore + m_env.admissibleHeuristic(neighbor.state);
+                            auto handle =
+                                openSet.push(Node(neighbor.state, fScore, tentative_gScore));
+                            (*handle).handle = handle;
+                            stateToHeap.insert(std::make_pair<>(neighbor.state, handle));
+                            m_env.onDiscover(neighbor.state, fScore, tentative_gScore);
+                            // std::cout << "  this is a new node " << fScore << "," <<
+                            // tentative_gScore << std::endl;
+                        } else { // this node is already in the heap
+                            auto handle = iter->second;
+                            // std::cout << "  this is an old node: " << tentative_gScore << ","
+                            // << (*handle).gScore << std::endl;
+
+                            // We found this node before with a better path
+                            if (tentative_gScore >= (*handle).gScore) {
+                            continue; // this is the skipping logic, read README
+                            }
+
+                            // update f and gScore
+                            Cost delta = (*handle).gScore - tentative_gScore;
+                            (*handle).gScore = tentative_gScore;
+                            (*handle).fScore -= delta;
+                            openSet.increase(handle); // rearrage the heap
+                            m_env.onDiscover(neighbor.state, (*handle).fScore,
+                                            (*handle).gScore);
                         }
 
-                        // update f and gScore
-                        Cost delta = (*handle).gScore - tentative_gScore;
-                        (*handle).gScore = tentative_gScore;
-                        (*handle).fScore -= delta;
-                        openSet.increase(handle);
-                        m_env.onDiscover(neighbor.state, (*handle).fScore,
-                                        (*handle).gScore);
+                        // Best path for this node so far
+                        // TODO: this is not the best way to update "cameFrom", but otherwise
+                        // default c'tors of State and Action are required
+                        cameFrom.erase(neighbor.state);
+                        cameFrom.insert(std::make_pair<>(
+                            neighbor.state,
+                            std::make_tuple<>(current.state, neighbor.action, neighbor.cost,
+                                                tentative_gScore)));
                     }
-
-                    // Best path for this node so far
-                    // TODO: this is not the best way to update "cameFrom", but otherwise
-                    // default c'tors of State and Action are required
-                    cameFrom.erase(neighbor.state);
-                    cameFrom.insert(std::make_pair<>(
-                        neighbor.state,
-                        std::make_tuple<>(current.state, neighbor.action, neighbor.cost,
-                                            tentative_gScore)));
-                    }
+                
                 } // neighbors loop ends
             } // pq ends
 
@@ -206,16 +221,18 @@ class AStar {
             handle;
     #endif
     };
+    
+    typedef typename  boost::heap::fibonacci_heap<Node>::handle_type stateKeyInHeap_t;
 
-    #ifdef USE_FIBONACCI_HEAP
-    typedef typename boost::heap::fibonacci_heap<Node> openSet_t;
-    typedef typename openSet_t::handle_type fibHeapHandle_t;
-    #else
-    typedef typename boost::heap::d_ary_heap<Node, boost::heap::arity<2>,
-                                            boost::heap::mutable_<true> >
-        openSet_t;
-    typedef typename openSet_t::handle_type fibHeapHandle_t;
-    #endif
+    // #ifdef USE_FIBONACCI_HEAP
+    // //typedef typename boost::heap::fibonacci_heap<Node> openSet_t;
+    // typedef typename openSet_t::handle_type stateKeyInHeap_t;
+    // #else
+    // typedef typename boost::heap::d_ary_heap<Node, boost::heap::arity<2>,
+    //                                         boost::heap::mutable_<true> >
+    //     openSet_t;
+    // typedef typename openSet_t::handle_type stateKeyInHeap_t;
+    // #endif
 
     private:
     Environment& m_env;
