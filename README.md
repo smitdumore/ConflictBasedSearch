@@ -141,3 +141,18 @@ Let’s say we eventually pop (2,0) with g=2. We check neighbor (2,1):
     ```
 
 - That means we thought (2,1) was done with cost=3, but we found a new path cost=2.5, so we “un-close” (2,1) and push it again. This is re-opening.
+
+# "Wait" Action in A star : 
+
+- Yes, you can absolutely include a “wait” action in an A* search.
+
+## Cost Assignment:
+- If a “wait” action has zero cost (or a very small cost), and your goal is just to minimize travel distance, the search could exploit that to remain in place indefinitely if that somehow avoids a large cost move. This is often undesirable.
+- Usually, you’d give the “wait” action a time or step cost just like a movement. If each step—no matter whether you move or wait—costs 1, then waiting isn’t “free” and won’t be abused.
+- In implementation the ```getNeighbors``` will return 5 neighbors ```left, right, up, down, wait```
+- 
+    ```
+    std::vector<int> vecx = {0,  0, -1, 1,  0};
+    std::vector<int> vecy = {-1, 1,  0, 0,  0};
+    ```
+
