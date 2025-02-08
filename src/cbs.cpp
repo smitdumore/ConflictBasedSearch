@@ -652,9 +652,7 @@ int main(int argc, char* argv[]) {
   CBS<State, Action, int, Conflict, Constraints, Environment> cbs(mapf);
   std::vector<PlanResult<State, Action, int> > solution;
 
-  Timer timer;
   bool success = cbs.search(startStates, solution);
-  timer.stop();
 
   if (success) {
     std::cout << "Planning successful! " << std::endl;
@@ -669,7 +667,6 @@ int main(int argc, char* argv[]) {
     out << "statistics:" << std::endl;
     out << "  cost: " << cost << std::endl;
     out << "  makespan: " << makespan << std::endl;
-    out << "  runtime: " << timer.elapsedSeconds() << std::endl;
     out << "  highLevelExpanded: " << mapf.highLevelExpanded() << std::endl;
     out << "  lowLevelExpanded: " << mapf.lowLevelExpanded() << std::endl;
     out << "schedule:" << std::endl;
