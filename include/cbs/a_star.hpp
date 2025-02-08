@@ -1,13 +1,9 @@
 #pragma once
 
-#ifdef USE_FIBONACCI_HEAP
 #include <boost/heap/fibonacci_heap.hpp>
-#endif
-
-#include <boost/heap/d_ary_heap.hpp>
 #include <unordered_map>
+#include <boost/heap/d_ary_heap.hpp>
 #include <unordered_set>
-
 #include "neighbor.hpp"
 #include "planresult.hpp"
 
@@ -156,52 +152,37 @@ class AStar {
             : state(state), fScore(fScore), gScore(gScore) {}
 
         bool operator<(const Node& other) const {
-        // Sort order
-        // 1. lowest fScore
-        // 2. highest gScore
+            // Sort order
+            // 1. lowest fScore
+            // 2. highest gScore
 
-        // Our heap is a maximum heap, so we invert the comperator function here
-        if (fScore != other.fScore) {
-            return fScore > other.fScore;
-        } else {
-            return gScore < other.gScore;
-        }
+            // Our heap is a maximum heap, so we invert the comperator function here
+            if (fScore != other.fScore) {
+                return fScore > other.fScore;
+            } else {
+                return gScore < other.gScore;
+            }
         }
 
         friend std::ostream& operator<<(std::ostream& os, const Node& node) {
-        os << "state: " << node.state << " fScore: " << node.fScore
-            << " gScore: " << node.gScore;
-        return os;
+            os << "state: " << node.state << " fScore: " << node.fScore
+                << " gScore: " << node.gScore;
+            return os;
         }
 
         State state;
 
         Cost fScore;
         Cost gScore;
-
-    #ifdef USE_FIBONACCI_HEAP
-        typename boost::heap::fibonacci_heap<Node>::handle_type handle;
-    #else
-        typename boost::heap::d_ary_heap<Node, boost::heap::arity<2>,
-                                        boost::heap::mutable_<true> >::handle_type
-            handle;
-    #endif
-    };
     
-    typedef typename  boost::heap::fibonacci_heap<Node>::handle_type stateKeyInHeap_t;
+        typename boost::heap::fibonacci_heap<Node>::handle_type handle;
+    };
 
-    // #ifdef USE_FIBONACCI_HEAP
-    // //typedef typename boost::heap::fibonacci_heap<Node> openSet_t;
-    // typedef typename openSet_t::handle_type stateKeyInHeap_t;
-    // #else
-    // typedef typename boost::heap::d_ary_heap<Node, boost::heap::arity<2>,
-    //                                         boost::heap::mutable_<true> >
-    //     openSet_t;
-    // typedef typename openSet_t::handle_type stateKeyInHeap_t;
-    // #endif
+    typedef typename boost::heap::fibonacci_heap<Node> openSet_t;
+    typedef typename  openSet_t::handle_type stateKeyInHeap_t;
 
     private:
-    Environment& m_env;
+        Environment& m_env;
     };
 
-}  // namespace libMultiRobotPlanning
+}  // namespace MultiRobotPlanning

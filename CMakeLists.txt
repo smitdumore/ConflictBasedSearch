@@ -1,5 +1,25 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 
 project(cbs)
 
-add_executable(run_cbs cbs/main.cpp)
+find_package(Boost 1.58 REQUIRED COMPONENTS program_options)
+find_package(PkgConfig)
+pkg_check_modules(YamlCpp yaml-cpp)
+
+# Enable C++14 and warnings
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+
+
+# Include the header files directory
+include_directories(include)
+
+add_executable(run_cbs src/cbs.cpp)
+
+# Link against required libraries
+target_link_libraries(run_cbs
+  ${Boost_LIBRARIES}
+  yaml-cpp
+)

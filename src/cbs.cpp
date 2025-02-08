@@ -3,11 +3,9 @@
 
 #include <boost/functional/hash.hpp>
 #include <boost/program_options.hpp>
-
 #include <yaml-cpp/yaml.h>
 
 #include <cbs/cbs.hpp>
-#include "timer.hpp"
 
 using MultiRobotPlanning::CBS;
 using MultiRobotPlanning::Neighbor;
