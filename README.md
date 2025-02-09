@@ -1,3 +1,10 @@
+# Table of Contents
+- **[How to run](#how-to-run)**
+- **[References](#references)**
+- **[Mutable vs Non-Mutable Priority Queue for Astar](#mutable-vs-non-mutable-priority-queue-for-astar)**
+- **[Wait Action in A star](#wait-action-in-a-star)**
+- **[ECBS and Weighted Astar](#ecbs-and-weighted-astar)**
+
 # How to run : 
 ```
 cd build
@@ -7,10 +14,10 @@ cd ..
 python3 visualize.py map_32by32_obst204_agents10_ex0.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml
 ```
 
-References :
+# References :
 1. https://github.com/whoenig/libMultiRobotPlanning
 2. https://github.com/yangda75/naiveMAPF/
-
+3. https://www.cs.cmu.edu/~motionplanning/lecture/Asearch_v8.pdf
 
 # Mutable vs Non-Mutable Priority Queue for Astar
 
@@ -23,7 +30,7 @@ References :
     ```
 3. In other words, we have a cheaper path to that node now, so there’s no point in spending time exploring the old, more expensive path
 
-# Why we re-open closed nodes ?
+## Why we re-open closed nodes ?
 
 ## Grid Setup
 Consider a 3×3 grid with cells labeled (row, col):
@@ -145,7 +152,7 @@ Let’s say we eventually pop (2,0) with g=2. We check neighbor (2,1):
 
 - That means we thought (2,1) was done with cost=3, but we found a new path cost=2.5, so we “un-close” (2,1) and push it again. This is re-opening.
 
-# "Wait" Action in A star : 
+# "Wait" Action in A star
 
 - Yes, you can absolutely include a “wait” action in an A* search.
 
@@ -159,3 +166,17 @@ Let’s say we eventually pop (2,0) with g=2. We check neighbor (2,1):
     std::vector<int> vecy = {-1, 1,  0, 0,  0};
     ```
 
+# ECBS and Weighted Astar
+
+## Clarifying the Focal Set in Weighted A*
+- bestFScore is the current minimum f-value in the openSet.
+- The focal set is a subset of nodes that are reasonably close to this minimum defined by the condition:
+    ```
+    f(n)≤w×bestFScore
+    ```
+
+### Example:
+
+- Assume bestFScore = 10 and w=1.2.
+- The suboptimality bound is 1.2×10=12.
+- The focal set will include all nodes with f(n)≤12.
