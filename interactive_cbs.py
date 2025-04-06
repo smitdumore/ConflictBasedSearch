@@ -11,9 +11,11 @@ import time
 import copy
 import argparse
 import signal
+import matplotlib.widgets as widgets
+from tkinter import Tk, messagebox
 
 class InteractiveCBS:
-    def __init__(self, map_file):
+    def __init__(self, map_file, max_nodes=10000):
         # Load map data
         with open(map_file, 'r') as f:
             self.map_data = yaml.safe_load(f)
@@ -26,6 +28,9 @@ class InteractiveCBS:
         self.temp_map_file = None
         self.temp_output_file = None
         self.cbs_executable = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build", "run_cbs")
+        
+        # Maximum nodes for CBS search
+        self.max_nodes = max_nodes
         
         # Animation variables
         self.current_schedule = None
@@ -129,6 +134,23 @@ class InteractiveCBS:
         self.clear_button_ax = plt.axes([0.15, 0.01, 0.15, 0.05])
         self.clear_button = plt.Button(self.clear_button_ax, 'Clear Animation')
         self.clear_button.on_clicked(self.on_clear_button)
+        
+        # Add reset map button
+        self.reset_button_ax = plt.axes([0.8, 0.01, 0.15, 0.05])
+        self.reset_button = plt.Button(self.reset_button_ax, 'Reset Map')
+        self.reset_button.on_clicked(self.on_reset_button)
+
+    def show_popup(self, title, message):
+        """Show a popup message to the user"""
+        # Use Tkinter for the popup
+        root = Tk()
+        root.withdraw()  # Hide the main window
+        
+        # Show the message box
+        messagebox.showinfo(title, message)
+        
+        # Clean up
+        root.destroy()
 
     def hide_initial_positions(self):
         """Hide the initial static agent positions"""
@@ -179,8 +201,10 @@ class InteractiveCBS:
                     self.map_modified = True
                     
                     # If animation is running, update planning
-                    if self.animation_running and self.current_agent_positions:
-                        self.trigger_replanning()
+                    if self.animation_running:
+                        # For obstacle removal, we don't need current positions
+                        # We can directly trigger replanning with a fresh animation
+                        self.trigger_replanning(is_obstacle_removal=True)
                     return
             
             # Add new obstacle
@@ -198,14 +222,33 @@ class InteractiveCBS:
             if self.animation_running and self.current_agent_positions:
                 self.trigger_replanning()
 
-    def trigger_replanning(self):
+    def trigger_replanning(self, is_obstacle_removal=False):
         """Trigger replanning based on current agent positions and updated map"""
         print("Map modified - triggering replanning")
         
         # Stop current animation
         self.animation_running = False
+        
+        # Wait for animation thread to terminate with a timeout
         if self.animation_thread and self.animation_thread.is_alive():
-            self.animation_thread.join()
+            try:
+                # Add a timeout to avoid hanging indefinitely
+                self.animation_thread.join(timeout=0.5)
+                if self.animation_thread.is_alive():
+                    print("Warning: Animation thread did not terminate properly")
+            except Exception as e:
+                print(f"Error stopping animation thread: {e}")
+        
+        # For obstacle removal, we can plan from the original positions
+        # which makes planning easier and avoids potential issues
+        if is_obstacle_removal:
+            # Reset agent positions to original values but keep obstacle changes
+            self.reset_agent_positions()
+            # Save updated map
+            self.save_temp_map()
+            # Run CBS planning again
+            self.run_cbs()
+            return
         
         # Update map with current agent positions
         if self.update_map_with_current_positions():
@@ -248,6 +291,26 @@ class InteractiveCBS:
         self.map_data = new_map
         print("Reset agent positions to original start locations")
         return True
+        
+    def reset_map(self):
+        """Reset the entire map to its original state"""
+        # Restore the original map data
+        self.map_data = copy.deepcopy(self.original_map_data)
+        
+        # Clear any existing animation
+        self.on_clear_button(None)
+        
+        # Reinitialize grid representation
+        self.init_grid()
+        
+        # Save the reset map
+        self.save_temp_map()
+        
+        # Update display
+        self.fig.canvas.draw_idle()
+        print("Map reset to original state")
+        
+        return True
 
     def on_run_button(self, event):
         print("Running planning with current obstacles...")
@@ -259,8 +322,16 @@ class InteractiveCBS:
     def on_clear_button(self, event):
         # Stop any running animation
         self.animation_running = False
+        
+        # Wait for animation thread to terminate with a timeout
         if self.animation_thread and self.animation_thread.is_alive():
-            self.animation_thread.join()
+            try:
+                # Add a timeout to avoid hanging indefinitely
+                self.animation_thread.join(timeout=0.5)
+                if self.animation_thread.is_alive():
+                    print("Warning: Animation thread did not terminate properly")
+            except Exception as e:
+                print(f"Error stopping animation thread: {e}")
         
         # Remove agent circles
         for agent_circle, label in self.agent_circles:
@@ -277,6 +348,13 @@ class InteractiveCBS:
         self.show_initial_positions()
         
         self.fig.canvas.draw_idle()
+        
+    def on_reset_button(self, event):
+        """Handle click on Reset Map button"""
+        self.reset_map()
+        
+        # Run initial planning with the reset map
+        self.run_cbs()
         
     def on_save_button(self, event):
         """Save the current map to a file"""
@@ -333,26 +411,47 @@ class InteractiveCBS:
         # Reset flag
         self.map_modified = False
         
-        # Build command
+        # Build command with max nodes parameter
         cmd = [
             self.cbs_executable,
             "-i", self.temp_map_file,
-            "-o", self.temp_output_file
+            "-o", self.temp_output_file,
+            "--max-nodes", str(self.max_nodes)
         ]
         
         # Run command
         try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
+            stdout_text = stdout.decode()
             
             if process.returncode != 0:
-                print(f"CBS planning failed: {stderr.decode()}")
+                error_message = stderr.decode()
+                print(f"CBS planning failed: {error_message}")
                 self.solution_found = False
                 self.run_button.label.set_text("Planning Failed")
                 self.fig.canvas.draw_idle()
+                
+                # Check if it was due to reaching max nodes
+                if "maximum node count limit" in stdout_text:
+                    self.show_popup("Search Terminated", 
+                                  f"CBS search terminated: reached maximum node count limit ({self.max_nodes} nodes). "
+                                  f"Try simplifying the problem or increasing the node limit.")
+                    self.reset_map()
+                else:
+                    self.show_popup("Planning Failed", f"CBS planning failed: {error_message}")
+                    
                 return
             
-            print(f"CBS planning finished: {stdout.decode()}")
+            print(f"CBS planning finished: {stdout_text}")
+            
+            # Check if it was a max nodes termination
+            if "maximum node count limit" in stdout_text:
+                self.show_popup("Search Terminated", 
+                              f"CBS search terminated: reached maximum node count limit ({self.max_nodes} nodes). "
+                              f"Try simplifying the problem or increasing the node limit.")
+                self.reset_map()
+                return
             
             # Load the solution
             try:
@@ -370,17 +469,29 @@ class InteractiveCBS:
                 self.solution_found = False
                 self.run_button.label.set_text("Solution Error")
                 self.fig.canvas.draw_idle()
+                
+                self.show_popup("Solution Error", f"Error loading solution: {e}")
         except Exception as e:
             print(f"Error running CBS planner: {e}")
             self.solution_found = False
             self.run_button.label.set_text("Execution Error")
             self.fig.canvas.draw_idle()
+            
+            self.show_popup("Execution Error", f"Error running CBS planner: {e}")
 
     def visualize_solution(self):
         # Clear previous animation
         self.animation_running = False
+        
+        # Wait for animation thread to terminate with a timeout
         if self.animation_thread and self.animation_thread.is_alive():
-            self.animation_thread.join()
+            try:
+                # Add a timeout to avoid hanging indefinitely
+                self.animation_thread.join(timeout=0.5)
+                if self.animation_thread.is_alive():
+                    print("Warning: Animation thread did not terminate properly")
+            except Exception as e:
+                print(f"Error stopping animation thread: {e}")
         
         # Remove existing agent circles
         for agent_circle, label in self.agent_circles:
@@ -448,15 +559,15 @@ class InteractiveCBS:
             
         self.fig.canvas.draw_idle()
         
-        # Get frame interval
-        frame_interval = 0.1  # seconds
+        # Get frame interval and steps (SLOWED DOWN)
+        frame_interval = 0.1  # seconds (increased from 0.02 to slow down)
+        steps_per_timestep = 5  # reduced number of interpolation steps (was 10)
+        num_frames = int(max_t * steps_per_timestep)
         
         # For each timestep
-        for t in range(int(max_t * 10)):
-            if not self.animation_running:
-                return
-                
-            current_t = t / 10.0
+        t = 0
+        while t < num_frames and self.animation_running:
+            current_t = t / steps_per_timestep
             
             # Update agent positions
             for i, ((circle, label), agent) in enumerate(zip(self.agent_circles, self.map_data["agents"])):
@@ -480,7 +591,12 @@ class InteractiveCBS:
                 return
             
             self.fig.canvas.draw_idle()
+            
+            # Simpler sleep approach for more accurate timing
             time.sleep(frame_interval)
+            
+            # Increment time step
+            t += 1
         
         self.animation_running = False
 
@@ -510,7 +626,9 @@ class InteractiveCBS:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Interactive CBS Path Planning")
     parser.add_argument("map", help="YAML file with map and agents")
+    parser.add_argument("--max-nodes", type=int, default=10000, 
+                        help="Maximum number of nodes in CBS search (default: 10000)")
     args = parser.parse_args()
     
-    app = InteractiveCBS(args.map)
+    app = InteractiveCBS(args.map, args.max_nodes)
     app.show() 
