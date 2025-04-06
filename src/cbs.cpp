@@ -316,34 +316,34 @@ class Environment {
       State n(s.time + 1, s.x, s.y);
       if (stateValid(n) && transitionValid(s, n)) {
         neighbors.emplace_back(
-            Neighbor<State, Action, int>(n, Action::Wait, 1));
+            Neighbor<State, Action, int>(n, Action::Wait, 1)); // WAIT action
       }
     }
     {
       State n(s.time + 1, s.x - 1, s.y);
       if (stateValid(n) && transitionValid(s, n)) {
         neighbors.emplace_back(
-            Neighbor<State, Action, int>(n, Action::Left, 1));
+            Neighbor<State, Action, int>(n, Action::Left, 1)); // LEFT action
       }
     }
     {
       State n(s.time + 1, s.x + 1, s.y);
       if (stateValid(n) && transitionValid(s, n)) {
         neighbors.emplace_back(
-            Neighbor<State, Action, int>(n, Action::Right, 1));
+            Neighbor<State, Action, int>(n, Action::Right, 1)); // RIGHT action
       }
     }
     {
       State n(s.time + 1, s.x, s.y + 1);
       if (stateValid(n) && transitionValid(s, n)) {
-        neighbors.emplace_back(Neighbor<State, Action, int>(n, Action::Up, 1));
+        neighbors.emplace_back(Neighbor<State, Action, int>(n, Action::Up, 1)); // UP action
       }
     }
     {
       State n(s.time + 1, s.x, s.y - 1);
       if (stateValid(n) && transitionValid(s, n)) {
         neighbors.emplace_back(
-            Neighbor<State, Action, int>(n, Action::Down, 1));
+            Neighbor<State, Action, int>(n, Action::Down, 1)); // DOWN action
       }
     }
   }

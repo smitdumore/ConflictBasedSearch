@@ -8,7 +8,7 @@
 # How to run : 
 ```
 cd build
-./run_cbs -i ../map_5by5_obst_agents2.yaml -o output.yaml 
+./run_cbs -i ../maps/map_5by5_obst_agents2.yaml -o output.yaml 
 
 cd ..
 python3 visualize.py map_5by5_obst_agents2.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml

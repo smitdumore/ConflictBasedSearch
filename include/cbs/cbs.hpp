@@ -154,6 +154,8 @@ class CBS {
       std::map<size_t, Constraints> constraints;
       m_env.createConstraintsFromConflict(conflict, constraints); // Constraints data struct stores mapping of agent id to its resp. constraints
 
+      // Visit neighbors step in BFS
+      // Creating a new node for every constraint
       for (const auto& c : constraints) {
         
         size_t i = c.first; // agent id
@@ -161,11 +163,13 @@ class CBS {
         HighLevelNode newNode = currCTNode;
         newNode.id = id;
         
-        assert(!newNode.constraints[i].overlap(c.second)); // TODO : what does this do ?
+        assert(!newNode.constraints[i].overlap(c.second)); // checks for duplicated constraints
 
-        newNode.constraints[i].add(c.second);
+        // Add the current constraint to the current CT node
+        newNode.constraints[i].add(c.second); // i is the agent id obtained from the current contraint
         newNode.cost -= newNode.solution[i].cost;
 
+        // Run low level stuff again        
         LowLevelEnvironment llenv(m_env, i, newNode.constraints[i]);
         LowLevelSearch_t lowLevel(llenv);
         bool success = lowLevel.search(initialStates[i], newNode.solution[i]);
@@ -178,6 +182,7 @@ class CBS {
           (*handle).handle = handle;
         }
 
+        // new id for new CT nodes
         ++id;
       }
     }
