@@ -4,6 +4,7 @@ from matplotlib.patches import Circle, Rectangle
 from matplotlib import animation
 import numpy as np
 import argparse
+import random
 
 
 class Animation:
@@ -11,7 +12,7 @@ class Animation:
         self.map = map_data
         self.schedule = schedule
 
-        self.colors = ['orange']  # List of agent colors (expand as needed)
+        self.colors = self.generate_colors(len(map_data["agents"]))  # Random agent colors
         self.agents = {}          # Stores Circle patches for agents
         self.agent_labels = {}    # Stores text labels for agents
         self.patches = []         # Stores all shape patches to be drawn
@@ -36,6 +37,10 @@ class Animation:
             blit=True
         )
 
+    def generate_colors(self, n):
+        # Generate n distinct random colors
+        return ["#%06x" % random.randint(0, 0xFFFFFF) for _ in range(n)]
+
     def setup_map(self):
         # Set plot limits based on map size
         width, height = self.map["map"]["dimensions"]
@@ -47,7 +52,7 @@ class Animation:
 
         # Draw each obstacle as a red square
         for x, y in self.map["map"]["obstacles"]:
-            self.patches.append(Rectangle((x - 0.5, y - 0.5), 1, 1, facecolor='red', edgecolor='red'))
+            self.patches.append(Rectangle((x - 0.5, y - 0.5), 1, 1, facecolor='black'))
 
     def setup_agents(self):
         max_t = 0
@@ -58,7 +63,13 @@ class Animation:
             goals = agent.get("potentialGoals", [agent["goal"]])
             for goal in goals:
                 self.patches.append(Rectangle((goal[0] - 0.25, goal[1] - 0.25), 0.5, 0.5,
-                                              facecolor=color, edgecolor='black', alpha=0.5))
+                                              facecolor='none', edgecolor=color, linewidth=2, linestyle='--'))
+
+            # Draw the full path of each agent before animation
+            path = self.schedule["schedule"][agent["name"]]
+            for step in path:
+                px, py = step["x"], step["y"]
+                self.patches.append(Rectangle((px - 0.5, py - 0.5), 1, 1, facecolor=color, alpha=0.1))
 
         for i, agent in enumerate(self.map["agents"]):
             name = agent["name"]
