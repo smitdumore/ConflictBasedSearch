@@ -14,6 +14,11 @@ cd ..
 python3 visualize.py maps/map_experiment.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml
 ```
 
+```
+./interactive_cbs.py maps/map_7by7_obst_agents6.yaml
+```
+
+
 # References :
 1. https://github.com/whoenig/libMultiRobotPlanning./run_cbs -i ../map_5by5_obst_agents2.yaml -o output.yaml
 2. https://github.com/yangda75/naiveMAPF/
