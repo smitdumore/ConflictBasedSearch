@@ -8,10 +8,10 @@
 # How to run : 
 ```
 cd build
-./run_cbs -i ../map_32by32_obst204_agents10_ex0.yaml -o output.yaml 
+./run_cbs -i ../map_5by5_obst_agents2.yaml -o output.yaml 
 
 cd ..
-python3 visualize.py map_32by32_obst204_agents10_ex0.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml
+python3 visualize.py map_5by5_obst_agents2.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml
 ```
 
 # References :

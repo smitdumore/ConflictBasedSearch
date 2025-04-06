@@ -95,26 +95,27 @@ class CBS {
     /******** Root of the conflict tree *********/ 
     // Every conflict tree node is a snapshot of time
     // It has the paths for all the robots and all the constraints at that time
+    // Conflict is agentd colliding and a Constraint is a restriction, know the difference
     HighLevelNode start;
     start.solution.resize(initialStates.size());
     start.constraints.resize(initialStates.size());
     start.cost = 0;
     start.id = 0;
     
-    /*** LowLevelSearch for avery Agent ****/
+    /*** LowLevelSearch for every Agent ****/
     for (size_t i = 0; i < initialStates.size(); ++i) {
-      // if (   i < solution.size()
-      //     && solution[i].states.size() > 1) {
-      //   start.solution[i] = solution[i];
-      //   std::cout << "use existing solution for agent: " << i << std::endl;
-      // } else {
+
+      // Initialize low level environment
       LowLevelEnvironment llenv(m_env, i, start.constraints[i]);
-      LowLevelSearch_t lowLevel(llenv); // this is the a_star instance
-      bool success = lowLevel.search(initialStates[i], start.solution[i]);   // first search in the root
+
+      // This is the a_star instance
+      // We pass the low level env to the search because the constraints are include in the low level env
+      LowLevelSearch_t lowLevel_search(llenv); 
+      bool success = lowLevel_search.search(initialStates[i], start.solution[i]); // Initial low level search
       if (!success) {
-        return false;          // constraints are empty, so if search returned false then the ith agent cant find a path due to map obstacles 
+        return false;          // Return false if the ith agent cant find a path due to map obstacles 
       }
-      // }
+
       start.cost += start.solution[i].cost;
     }
     /*** Done with first steps ****/
@@ -134,40 +135,35 @@ class CBS {
     int id = 1; // id for the first child, root id was 0
 
     while (!open.empty()) {
-      HighLevelNode P = open.top();
-      m_env.onExpandHighLevelNode(P.cost);
-      // std::cout << "expand: " << P << std::endl;
 
+      // Current Conflict Tree Node
+      HighLevelNode currCTNode = open.top();
       open.pop();
 
-      Conflict conflict;
-      if (!m_env.getFirstConflict(P.solution, conflict)) {
+      Conflict conflict; 
+      if (!m_env.getFirstConflict(currCTNode.solution, conflict)) {       // Environment owns finding conflicts
         // if didnt get any conflict then return the solution of that node
-        std::cout << "done; cost: " << P.cost << std::endl;
-        solution = P.solution;
+        std::cout << "CBS done; cost: " << currCTNode.cost << std::endl;
+        solution = currCTNode.solution;
         return true;
       }
 
-      // create additional nodes to resolve conflict
-      // std::cout << "Found conflict: " << conflict << std::endl;
-      // std::cout << "Found conflict at t=" << conflict.time << " type: " <<
-      // conflict.type << std::endl;
+      // Create additional nodes to resolve conflict
+      // Also convert conflicts into constraints for next CT node search
 
       std::map<size_t, Constraints> constraints;
-      m_env.createConstraintsFromConflict(conflict, constraints);
+      m_env.createConstraintsFromConflict(conflict, constraints); // Constraints data struct stores mapping of agent id to its resp. constraints
+
       for (const auto& c : constraints) {
-        // std::cout << "Add HL node for " << c.first << std::endl;
-        size_t i = c.first;
-        // std::cout << "create child with id " << id << std::endl;
-        HighLevelNode newNode = P;
+        
+        size_t i = c.first; // agent id
+        
+        HighLevelNode newNode = currCTNode;
         newNode.id = id;
-        // (optional) check that this constraint was not included already
-        // std::cout << newNode.constraints[i] << std::endl;
-        // std::cout << c.second << std::endl;
-        assert(!newNode.constraints[i].overlap(c.second));
+        
+        assert(!newNode.constraints[i].overlap(c.second)); // TODO : what does this do ?
 
         newNode.constraints[i].add(c.second);
-
         newNode.cost -= newNode.solution[i].cost;
 
         LowLevelEnvironment llenv(m_env, i, newNode.constraints[i]);

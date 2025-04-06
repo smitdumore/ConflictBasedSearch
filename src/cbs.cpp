@@ -32,7 +32,6 @@ struct State {
     int y;
     /****** Definition of a State ********/
 };
-/*******************************************STATE*****************************************************/
 
 // Custom hash function for state
 namespace std {
@@ -47,6 +46,7 @@ struct hash<State> {
   }
 };
 }  // namespace std
+/*******************************************STATE*****************************************************/
 
 /*******************************************ACTION*****************************************************/
 enum class Action {
@@ -109,9 +109,11 @@ struct Conflict {
 };
 /*******************************************CONFLICT*****************************************************/
 
-/*******************************************V CONSTRAINT*****************************************************/
+/*******************************************VERTEX CONSTRAINT*****************************************************/
 struct VertexConstraint {
   VertexConstraint(int time, int x, int y) : time(time), x(x), y(y) {}
+
+  // A Vertex Constraint is basically -> "Don't be a certain 'x,y' at a certain 't'"
   int time;
   int x;
   int y;
@@ -141,12 +143,14 @@ struct hash<VertexConstraint> {
   }
 };
 }  // namespace std
-/*******************************************V CONSTRAINT*****************************************************/
+/*******************************************VERTEX CONSTRAINT*****************************************************/
 
-/*******************************************E CONSTRAINT*****************************************************/
+/*******************************************EDGE CONSTRAINT*****************************************************/
 struct EdgeConstraint {
   EdgeConstraint(int time, int x1, int y1, int x2, int y2)
       : time(time), x1(x1), y1(y1), x2(x2), y2(y2) {}
+
+  // An Edge Constraint is basically -> "Don't transition from x1,y1 to x2,y2 at t"
   int time;
   int x1;
   int y1;
@@ -183,9 +187,9 @@ struct hash<EdgeConstraint> {
   }
 };
 }  // namespace std
-/*******************************************E CONSTRAINT*****************************************************/
+/*******************************************EDGE CONSTRAINT*****************************************************/
 
-/*******************************************CONSTRAINT*****************************************************/
+/*******************************************ALL CONSTRAINT*****************************************************/
 struct Constraints {
   std::unordered_set<VertexConstraint> vertexConstraints;
   std::unordered_set<EdgeConstraint> edgeConstraints;
@@ -221,8 +225,9 @@ struct Constraints {
     return os;
   }
 };
-/*******************************************E CONSTRAINT*****************************************************/
+/*******************************************ALL CONSTRAINT*****************************************************/
 
+// THIS IS STATE WITHOUT TIME
 struct Location {
   Location(int x, int y) : x(x), y(y) {}
   int x;
@@ -343,20 +348,38 @@ class Environment {
     }
   }
 
-  bool getFirstConflict(
-      const std::vector<PlanResult<State, Action, int> >& solution,
-      Conflict& result) {
+  bool getFirstConflict( const std::vector<PlanResult<State, Action, int> >& solution,
+                          Conflict& result) {
+
+    /**
+     * @param : solution is a CBS solution, its size is the number of agents
+     *          It is essentially a vector of paths of all robots (x,y,time) 
+    */
+
+    // Make span of the solution                       
     int max_t = 0;
     for (const auto& sol : solution) {
       max_t = std::max<int>(max_t, sol.states.size() - 1);
     }
 
+    const size_t no_of_agents = solution.size();
+
+    /*** Find Vertex Conflict ***/
+    // Loop through all time steps of the CBS solution
     for (int t = 0; t <= max_t; ++t) {
-      // check drive-drive vertex collisions
-      for (size_t i = 0; i < solution.size(); ++i) {
+
+      // Loop through all the agent paths
+      for (size_t i = 0; i < no_of_agents; ++i) {
+
+        // Get ith agent's pose at time = t
         State state1 = getState(i, solution, t);
-        for (size_t j = i + 1; j < solution.size(); ++j) {
+        
+        // Loop through paths of all agents after i
+        for (size_t j = i + 1; j < no_of_agents; ++j) {
+
+          // Get jth agent's pose at time = t
           State state2 = getState(j, solution, t);
+
           if (state1.equalExceptTime(state2)) {
             result.time = t;
             result.agent1 = i;
@@ -364,19 +387,29 @@ class Environment {
             result.type = Conflict::Vertex;
             result.x1 = state1.x;
             result.y1 = state1.y;
-            // std::cout << "VC " << t << "," << state1.x << "," << state1.y <<
-            // std::endl;
             return true;
           }
         }
       }
-      // drive-drive edge (swap)
-      for (size_t i = 0; i < solution.size(); ++i) {
-        State state1a = getState(i, solution, t);
+      
+      /*** Find Edge Conflict (Swap) ***/
+      // Loop through all agents
+      for (size_t i = 0; i < no_of_agents; ++i) {
+        
+        // Get ith agents state at time t and
+        // Get ith agents state at time t + 1
+        State state1a = getState(i, solution,  t);
         State state1b = getState(i, solution, t + 1);
-        for (size_t j = i + 1; j < solution.size(); ++j) {
+
+        // Loop through paths of all agents after i
+        for (size_t j = i + 1; j < no_of_agents; ++j) {
+          
+          // Get jth agents state at time t and
+          // Get jth agents state at time t + 1
           State state2a = getState(j, solution, t);
           State state2b = getState(j, solution, t + 1);
+          
+          // check swap
           if (state1a.equalExceptTime(state2b) &&
               state1b.equalExceptTime(state2a)) {
             result.time = t;
@@ -396,23 +429,30 @@ class Environment {
     return false;
   }
 
-  void createConstraintsFromConflict(
-      const Conflict& conflict, std::map<size_t, Constraints>& constraints) {
+  void createConstraintsFromConflict( const Conflict& conflict, std::map<size_t, Constraints>& constraints) {
+
+    /**
+     * @param : constriants : It maps Agent to constraints data struct 
+    */
+
     if (conflict.type == Conflict::Vertex) {
-      Constraints c1;
-      c1.vertexConstraints.emplace(
-          VertexConstraint(conflict.time, conflict.x1, conflict.y1));
+      Constraints c1; // This data structure holds 2 sets of vertex and edge constraints
+
+      // Vertex Constraint : Dont occupy x1,y1 at t
+      c1.vertexConstraints.emplace(VertexConstraint(conflict.time, conflict.x1, conflict.y1));
+
+      // Mapping agents involved to their resp. constraints
       constraints[conflict.agent1] = c1;
       constraints[conflict.agent2] = c1;
-    } else if (conflict.type == Conflict::Edge) {
-      Constraints c1;
-      c1.edgeConstraints.emplace(EdgeConstraint(
-          conflict.time, conflict.x1, conflict.y1, conflict.x2, conflict.y2));
-      constraints[conflict.agent1] = c1;
-      Constraints c2;
-      c2.edgeConstraints.emplace(EdgeConstraint(
-          conflict.time, conflict.x2, conflict.y2, conflict.x1, conflict.y1));
-      constraints[conflict.agent2] = c2;
+    } 
+    else if (conflict.type == Conflict::Edge) {
+      Constraints c1; // This data structure holds 2 sets of vertex and edge constraints
+      c1.edgeConstraints.emplace(EdgeConstraint(conflict.time, conflict.x1, conflict.y1, conflict.x2, conflict.y2));
+      constraints[conflict.agent1] = c1; // Mapping agent to its resp. constraint
+      
+      Constraints c2; // This data structure holds 2 sets of vertex and edge constraints
+      c2.edgeConstraints.emplace(EdgeConstraint(conflict.time, conflict.x2, conflict.y2, conflict.x1, conflict.y1));
+      constraints[conflict.agent2] = c2; // Mapping agent to its resp. constraint
     }
   }
 
@@ -588,12 +628,16 @@ class Environment {
 /*******************************************ENVIRONMENT****************************************************/
 
 int main(int argc, char* argv[]) {
-  namespace po = boost::program_options;
+  
   // Declare the supported options.
+  // Terminal stuff to run code
+  namespace po = boost::program_options;
   po::options_description desc("Allowed options");
   std::string inputFile;
   std::string outputFile;
+  
   bool disappearAtGoal;
+  
   desc.add_options()("help", "produce help message")(
       "input,i", po::value<std::string>(&inputFile)->required(),
       "input file (YAML)")("output,o",
@@ -618,6 +662,7 @@ int main(int argc, char* argv[]) {
 
   YAML::Node config = YAML::LoadFile(inputFile);
 
+  // CBS logic start
   std::unordered_set<Location> obstacles;
   std::vector<Location> goals;
   std::vector<State> startStates;
@@ -634,7 +679,6 @@ int main(int argc, char* argv[]) {
     const auto& start = node["start"];
     const auto& goal = node["goal"];
     startStates.emplace_back(State(0, start[0].as<int>(), start[1].as<int>()));
-    // std::cout << "s: " << startStates.back() << std::endl;
     goals.emplace_back(Location(goal[0].as<int>(), goal[1].as<int>()));
   }
 
@@ -648,7 +692,10 @@ int main(int argc, char* argv[]) {
     startStatesSet.insert(s);
   }
 
+  // Initialize environment
   Environment mapf(dimx, dimy, obstacles, goals, disappearAtGoal);
+
+  // Initialize CBS templated object
   CBS<State, Action, int, Conflict, Constraints, Environment> cbs(mapf);
   std::vector<PlanResult<State, Action, int> > solution;
 
@@ -657,36 +704,13 @@ int main(int argc, char* argv[]) {
   if (success) {
     std::cout << "Planning successful! " << std::endl;
     int cost = 0;
-    int makespan = 0;
+    int makespan = 0; // time take for the entire MAPF problem to execute
     for (const auto& s : solution) {
       cost += s.cost;
       makespan = std::max<int>(makespan, s.cost);
     }
 
-    std::ofstream out(outputFile);
-    out << "statistics:" << std::endl;
-    out << "  cost: " << cost << std::endl;
-    out << "  makespan: " << makespan << std::endl;
-    out << "  highLevelExpanded: " << mapf.highLevelExpanded() << std::endl;
-    out << "  lowLevelExpanded: " << mapf.lowLevelExpanded() << std::endl;
-    out << "schedule:" << std::endl;
-    for (size_t a = 0; a < solution.size(); ++a) {
-      // std::cout << "Solution for: " << a << std::endl;
-      // for (size_t i = 0; i < solution[a].actions.size(); ++i) {
-      //   std::cout << solution[a].states[i].second << ": " <<
-      //   solution[a].states[i].first << "->" << solution[a].actions[i].first
-      //   << "(cost: " << solution[a].actions[i].second << ")" << std::endl;
-      // }
-      // std::cout << solution[a].states.back().second << ": " <<
-      // solution[a].states.back().first << std::endl;
-
-      out << "  agent" << a << ":" << std::endl;
-      for (const auto& state : solution[a].states) {
-        out << "    - x: " << state.first.x << std::endl
-            << "      y: " << state.first.y << std::endl
-            << "      t: " << state.second << std::endl;
-      }
-    }
+    // print cost and makespan
   } else {
     std::cout << "Planning NOT successful!" << std::endl;
   }
