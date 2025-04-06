@@ -8,14 +8,14 @@
 # How to run : 
 ```
 cd build
-./run_cbs -i ../maps/map_5by5_obst_agents2.yaml -o output.yaml 
+./run_cbs -i ../maps/map_experiment.yaml -o output.yaml
 
 cd ..
-python3 visualize.py map_5by5_obst_agents2.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml
+python3 visualize.py maps/map_experiment.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml
 ```
 
 # References :
-1. https://github.com/whoenig/libMultiRobotPlanning
+1. https://github.com/whoenig/libMultiRobotPlanning./run_cbs -i ../map_5by5_obst_agents2.yaml -o output.yaml
 2. https://github.com/yangda75/naiveMAPF/
 3. https://www.cs.cmu.edu/~motionplanning/lecture/Asearch_v8.pdf
 
