@@ -637,13 +637,17 @@ int main(int argc, char* argv[]) {
   std::string outputFile;
   
   bool disappearAtGoal;
+  int maxNodes;
   
   desc.add_options()("help", "produce help message")(
       "input,i", po::value<std::string>(&inputFile)->required(),
       "input file (YAML)")("output,o",
                            po::value<std::string>(&outputFile)->required(),
                            "output file (YAML)")(
-      "disappear-at-goal", po::bool_switch(&disappearAtGoal), "make agents to disappear at goal rather than staying there");
+      "disappear-at-goal", po::bool_switch(&disappearAtGoal), 
+      "make agents to disappear at goal rather than staying there")(
+      "max-nodes", po::value<int>(&maxNodes)->default_value(10000),
+      "maximum number of high level nodes to explore in CBS");
 
   try {
     po::variables_map vm;
@@ -695,8 +699,8 @@ int main(int argc, char* argv[]) {
   // Initialize environment
   Environment mapf(dimx, dimy, obstacles, goals, disappearAtGoal);
 
-  // Initialize CBS templated object
-  CBS<State, Action, int, Conflict, Constraints, Environment> cbs(mapf);
+  // Initialize CBS templated object with max nodes parameter
+  CBS<State, Action, int, Conflict, Constraints, Environment> cbs(mapf, maxNodes);
   std::vector<PlanResult<State, Action, int> > solution;
 
   bool success = cbs.search(startStates, solution);

@@ -85,9 +85,14 @@ class CBS {
   private:
     Environment& m_env;
     typedef AStar<State, Action, Cost, LowLevelEnvironment> LowLevelSearch_t;
+    
+    // Maximum number of high-level nodes to explore before terminating search
+    const size_t m_maxNodes;
 
   public:
-  CBS(Environment& environment) : m_env(environment) {}
+  // Constructor with default max nodes value
+  CBS(Environment& environment, size_t maxNodes = 10000) 
+      : m_env(environment), m_maxNodes(maxNodes) {}
 
   bool search(const std::vector<State>& initialStates,
               std::vector<PlanResult<State, Action, Cost> >& solution) {
@@ -133,12 +138,24 @@ class CBS {
 
     solution.clear();
     int id = 1; // id for the first child, root id was 0
+    
+    // Node count tracking
+    size_t nodesExpanded = 0;
 
     while (!open.empty()) {
-
+      // Check if maximum node count reached
+      if (nodesExpanded >= m_maxNodes) {
+        std::cout << "CBS search terminated: reached maximum node count limit (" 
+                  << m_maxNodes << " nodes)" << std::endl;
+        return false;
+      }
+      
       // Current Conflict Tree Node
       HighLevelNode currCTNode = open.top();
       open.pop();
+      
+      // Increment node counter
+      nodesExpanded++;
 
       Conflict conflict; 
       if (!m_env.getFirstConflict(currCTNode.solution, conflict)) {       // Environment owns finding conflicts
@@ -186,6 +203,16 @@ class CBS {
         ++id;
       }
     }
+
+    // TODO: Future Improvements for Search Termination
+    // 1. Implement conflict cycling detection to identify when the algorithm is cycling through
+    //    the same conflicts repeatedly, indicating a potential infinite loop
+    // 
+    // 2. Add plateau detection to terminate search when solution quality doesn't improve
+    //    after exploring a significant number of nodes
+    //
+    // 3. Consider adding a time-based limit to ensure the algorithm terminates
+    //    within a reasonable time frame regardless of node count
 
     return false;
   }
