@@ -84,6 +84,7 @@ struct Conflict {
   enum Type {
     Vertex,
     Edge,
+    Proximity,  // New conflict type for space slack
   };
 
   int time;
@@ -102,6 +103,9 @@ struct Conflict {
         return os << c.time << ": Vertex(" << c.x1 << "," << c.y1 << ")";
       case Edge:
         return os << c.time << ": Edge(" << c.x1 << "," << c.y1 << "," << c.x2
+                  << "," << c.y2 << ")";
+      case Proximity:
+        return os << c.time << ": Proximity(" << c.x1 << "," << c.y1 << "," << c.x2
                   << "," << c.y2 << ")";
     }
     return os;
@@ -262,7 +266,7 @@ struct hash<Location> {
 class Environment {
  public:
   Environment(size_t dimx, size_t dimy, std::unordered_set<Location> obstacles,
-              std::vector<Location> goals, bool disappearAtGoal = false)
+              std::vector<Location> goals, bool disappearAtGoal = false, int spaceSlack = 2)
       : m_dimx(dimx),
         m_dimy(dimy),
         m_obstacles(std::move(obstacles)),
@@ -272,7 +276,8 @@ class Environment {
         m_lastGoalConstraint(-1),
         m_highLevelExpanded(0),
         m_lowLevelExpanded(0),
-        m_disappearAtGoal(disappearAtGoal)
+        m_disappearAtGoal(disappearAtGoal),
+        m_spaceSlack(spaceSlack)
   {
   }
 
@@ -356,7 +361,7 @@ class Environment {
      *          It is essentially a vector of paths of all robots (x,y,time) 
     */
 
-    // Make span of the solution                       
+    // Find maximum timestep
     int max_t = 0;
     for (const auto& sol : solution) {
       max_t = std::max<int>(max_t, sol.states.size() - 1);
@@ -364,22 +369,17 @@ class Environment {
 
     const size_t no_of_agents = solution.size();
 
-    /*** Find Vertex Conflict ***/
-    // Loop through all time steps of the CBS solution
+    // Using a unified approach for all conflict types with direction-sensitive proximity detection
+    
+    // Check for vertex conflicts and proximity conflicts
     for (int t = 0; t <= max_t; ++t) {
-
-      // Loop through all the agent paths
       for (size_t i = 0; i < no_of_agents; ++i) {
-
-        // Get ith agent's pose at time = t
         State state1 = getState(i, solution, t);
         
-        // Loop through paths of all agents after i
         for (size_t j = i + 1; j < no_of_agents; ++j) {
-
-          // Get jth agent's pose at time = t
           State state2 = getState(j, solution, t);
-
+          
+          // First check for vertex conflicts (exact same position)
           if (state1.equalExceptTime(state2)) {
             result.time = t;
             result.agent1 = i;
@@ -389,29 +389,55 @@ class Environment {
             result.y1 = state1.y;
             return true;
           }
+          
+          // Then check for proximity conflicts with direction-of-travel focus
+          int dx = std::abs(state1.x - state2.x);
+          int dy = std::abs(state1.y - state2.y);
+          
+          // If space slack is 1, we don't check for proximity conflicts (default CBS behavior)
+          if (m_spaceSlack > 1) {
+            // Agents in the same lane need to maintain the full space slack
+            if (dy == 0 && dx < m_spaceSlack) {
+              result.time = t;
+              result.agent1 = i;
+              result.agent2 = j;
+              result.type = Conflict::Proximity;
+              result.x1 = state1.x;
+              result.y1 = state1.y;
+              result.x2 = state2.x;
+              result.y2 = state2.y;
+              return true;
+            }
+            // Agents in adjacent lanes (dy=1) need reduced spacing in the direction of travel
+            else if (dy == 1 && dx < m_spaceSlack - 1) {
+              result.time = t;
+              result.agent1 = i;
+              result.agent2 = j;
+              result.type = Conflict::Proximity;
+              result.x1 = state1.x;
+              result.y1 = state1.y;
+              result.x2 = state2.x;
+              result.y2 = state2.y;
+              return true;
+            }
+            // Agents further apart vertically have no proximity constraints
+          }
         }
       }
-      
-      /*** Find Edge Conflict (Swap) ***/
-      // Loop through all agents
-      for (size_t i = 0; i < no_of_agents; ++i) {
-        
-        // Get ith agents state at time t and
-        // Get ith agents state at time t + 1
-        State state1a = getState(i, solution,  t);
-        State state1b = getState(i, solution, t + 1);
+    }
 
-        // Loop through paths of all agents after i
+    // Check for edge conflicts (agents swapping positions)
+    for (int t = 0; t < max_t; ++t) {
+      for (size_t i = 0; i < no_of_agents; ++i) {
+        State state1a = getState(i, solution, t);
+        State state1b = getState(i, solution, t + 1);
+        
         for (size_t j = i + 1; j < no_of_agents; ++j) {
-          
-          // Get jth agents state at time t and
-          // Get jth agents state at time t + 1
           State state2a = getState(j, solution, t);
           State state2b = getState(j, solution, t + 1);
           
-          // check swap
-          if (state1a.equalExceptTime(state2b) &&
-              state1b.equalExceptTime(state2a)) {
+          // Check if agents are swapping positions
+          if (state1a.equalExceptTime(state2b) && state1b.equalExceptTime(state2a)) {
             result.time = t;
             result.agent1 = i;
             result.agent2 = j;
@@ -453,6 +479,23 @@ class Environment {
       Constraints c2; // This data structure holds 2 sets of vertex and edge constraints
       c2.edgeConstraints.emplace(EdgeConstraint(conflict.time, conflict.x2, conflict.y2, conflict.x1, conflict.y1));
       constraints[conflict.agent2] = c2; // Mapping agent to its resp. constraint
+    }
+    else if (conflict.type == Conflict::Proximity) {
+      // For proximity conflicts, we create vertex constraints
+      // We constrain one agent from being at its position at that time
+      // And the other agent from being at its position at that time
+      // This forces one of them to find an alternative path
+
+      // SLACK IS ONLY IN THE DIRECTION OF TRAVEL, WE INFLATE THE NEXT X NODES IN THE PATH , 
+      // NOT ALL THE 4/8 CONNECTED NEIGHBORS OF THE NODES ON THE PATH 
+      
+      Constraints c1;
+      c1.vertexConstraints.emplace(VertexConstraint(conflict.time, conflict.x1, conflict.y1));
+      constraints[conflict.agent1] = c1;
+      
+      Constraints c2;
+      c2.vertexConstraints.emplace(VertexConstraint(conflict.time, conflict.x2, conflict.y2));
+      constraints[conflict.agent2] = c2;
     }
   }
 
@@ -624,6 +667,7 @@ class Environment {
   int m_highLevelExpanded;
   int m_lowLevelExpanded;
   bool m_disappearAtGoal;
+  int m_spaceSlack;
 };
 /*******************************************ENVIRONMENT****************************************************/
 
@@ -638,6 +682,7 @@ int main(int argc, char* argv[]) {
   
   bool disappearAtGoal;
   int maxNodes;
+  int spaceSlack;
   
   desc.add_options()("help", "produce help message")(
       "input,i", po::value<std::string>(&inputFile)->required(),
@@ -647,7 +692,9 @@ int main(int argc, char* argv[]) {
       "disappear-at-goal", po::bool_switch(&disappearAtGoal), 
       "make agents to disappear at goal rather than staying there")(
       "max-nodes", po::value<int>(&maxNodes)->default_value(10000),
-      "maximum number of high level nodes to explore in CBS");
+      "maximum number of high level nodes to explore in CBS")(
+      "space-slack", po::value<int>(&spaceSlack)->default_value(2),
+      "minimum space between agents in grid cells");
 
   try {
     po::variables_map vm;
@@ -697,7 +744,7 @@ int main(int argc, char* argv[]) {
   }
 
   // Initialize environment
-  Environment mapf(dimx, dimy, obstacles, goals, disappearAtGoal);
+  Environment mapf(dimx, dimy, obstacles, goals, disappearAtGoal, spaceSlack);
 
   // Initialize CBS templated object with max nodes parameter
   CBS<State, Action, int, Conflict, Constraints, Environment> cbs(mapf, maxNodes);
@@ -721,6 +768,7 @@ int main(int argc, char* argv[]) {
     out << "  makespan: " << makespan << std::endl;
     out << "  highLevelExpanded: " << mapf.highLevelExpanded() << std::endl;
     out << "  lowLevelExpanded: " << mapf.lowLevelExpanded() << std::endl;
+    out << "  spaceSlack: " << spaceSlack << std::endl;
     out << "schedule:" << std::endl;
     for (size_t a = 0; a < solution.size(); ++a) {
 

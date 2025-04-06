@@ -15,7 +15,7 @@ import matplotlib.widgets as widgets
 from tkinter import Tk, messagebox
 
 class InteractiveCBS:
-    def __init__(self, map_file, max_nodes=10000):
+    def __init__(self, map_file, max_nodes=10000, space_slack=1):
         # Load map data
         with open(map_file, 'r') as f:
             self.map_data = yaml.safe_load(f)
@@ -31,6 +31,9 @@ class InteractiveCBS:
         
         # Maximum nodes for CBS search
         self.max_nodes = max_nodes
+        
+        # Space slack parameter
+        self.space_slack = space_slack
         
         # Animation variables
         self.current_schedule = None
@@ -50,7 +53,7 @@ class InteractiveCBS:
         self.fig.canvas.manager.set_window_title("Interactive CBS Path Planning")
         
         # Configure axes
-        self.ax.set_title("Click to add/remove obstacles, then click 'Run Planning'")
+        self.ax.set_title(f"Click to add/remove obstacles, then click 'Run Planning' (Space Slack: {self.space_slack})")
         self.ax.set_aspect('equal')
         
         # Initialize the grid representation
@@ -116,7 +119,7 @@ class InteractiveCBS:
         self.initial_positions_visible = True
         
         # Set up grid appearance
-        self.ax.set_title("Click to add/remove obstacles, then click 'Run Planning'")
+        self.ax.set_title(f"Click to add/remove obstacles, then click 'Run Planning' (Space Slack: {self.space_slack})")
         self.ax.set_aspect('equal')
 
     def init_ui(self):
@@ -411,12 +414,13 @@ class InteractiveCBS:
         # Reset flag
         self.map_modified = False
         
-        # Build command with max nodes parameter
+        # Build command with max nodes parameter and space slack
         cmd = [
             self.cbs_executable,
             "-i", self.temp_map_file,
             "-o", self.temp_output_file,
-            "--max-nodes", str(self.max_nodes)
+            "--max-nodes", str(self.max_nodes),
+            "--space-slack", str(self.space_slack)
         ]
         
         # Run command
@@ -524,10 +528,11 @@ class InteractiveCBS:
         self.animation_thread.daemon = True
         self.animation_thread.start()
         
-        # Show makespan and cost
+        # Show makespan, cost and space slack
         makespan = self.current_schedule["statistics"]["makespan"]
         cost = self.current_schedule["statistics"]["cost"]
-        self.ax.set_title(f"Solution: Makespan={makespan}, Cost={cost}")
+        space_slack = self.current_schedule["statistics"].get("spaceSlack", self.space_slack)
+        self.ax.set_title(f"Solution: Makespan={makespan}, Cost={cost}, Space Slack={space_slack}")
         self.fig.canvas.draw_idle()
 
     def animate_solution(self):
@@ -628,7 +633,9 @@ if __name__ == "__main__":
     parser.add_argument("map", help="YAML file with map and agents")
     parser.add_argument("--max-nodes", type=int, default=10000, 
                         help="Maximum number of nodes in CBS search (default: 10000)")
+    parser.add_argument("--space-slack", type=int, default=1,
+                        help="Minimum space between agents in grid cells (default: 1)")
     args = parser.parse_args()
     
-    app = InteractiveCBS(args.map, args.max_nodes)
+    app = InteractiveCBS(args.map, args.max_nodes, args.space_slack)
     app.show() 
