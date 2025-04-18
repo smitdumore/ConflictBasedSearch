@@ -8,15 +8,16 @@
 # How to run : 
 ```
 cd build
-./run_cbs -i ../maps/map_experiment.yaml -o output.yaml
-
-cd ..
-python3 visualize.py maps/map_experiment.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml
-```
+./run_cbs -i ../maps/map_experiment.yaml -o output.yaml #deprecated
 
 ```
 ./interactive_cbs.py maps/map_7by7_obst_agents6.yaml
 ```
+
+cd ..
+python3 visualize.py maps/map_experiment.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml #deprecated
+```
+
 
 
 # References :

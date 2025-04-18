@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include "neighbor.hpp"
 #include "planresult.hpp"
+#include "common.hpp"
 
 namespace MultiRobotPlanning {
 
