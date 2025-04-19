@@ -53,23 +53,13 @@ enum class Action {
   Wait,
 };
 
-std::ostream& operator<<(std::ostream& os, const Action& a) {
+inline std::ostream& operator<<(std::ostream& os, const Action& a) {
   switch (a) {
-    case Action::Up:
-      os << "Up";
-      break;
-    case Action::Down:
-      os << "Down";
-      break;
-    case Action::Left:
-      os << "Left";
-      break;
-    case Action::Right:
-      os << "Right";
-      break;
-    case Action::Wait:
-      os << "Wait";
-      break;
+    case Action::Up: os << "Up"; break;
+    case Action::Down: os << "Down"; break;
+    case Action::Left: os << "Left"; break;
+    case Action::Right: os << "Right"; break;
+    case Action::Wait: os << "Wait"; break;
   }
   return os;
 }
@@ -240,11 +230,12 @@ struct Location {
   bool operator==(const Location& other) const {
     return std::tie(x, y) == std::tie(other.x, other.y);
   }
-
-  friend std::ostream& operator<<(std::ostream& os, const Location& c) {
-    return os << "(" << c.x << "," << c.y << ")";
-  }
 };
+
+inline std::ostream& operator<<(std::ostream& os, const Location& c) {
+  return os << "(" << c.x << "," << c.y << ")";
+}
+
 
 namespace std {
 template <>

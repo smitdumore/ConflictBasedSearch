@@ -1,25 +1,41 @@
-cmake_minimum_required(VERSION 3.5)
-
+cmake_minimum_required(VERSION 3.10)
 project(cbs)
 
-find_package(Boost 1.58 REQUIRED COMPONENTS program_options)
-find_package(PkgConfig)
-pkg_check_modules(YamlCpp yaml-cpp)
-
-# Enable C++14 and warnings
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+set(CMAKE_AUTOMOC ON)
 
+# Compile warnings
+add_compile_options(-Wall -Wextra)
 
-# Include the header files directory
-include_directories(include)
+# Dependencies
+find_package(Boost 1.58 REQUIRED COMPONENTS program_options)
+find_package(PkgConfig)
+pkg_check_modules(YamlCpp yaml-cpp)
+find_package(Qt5 REQUIRED COMPONENTS Widgets)
 
-add_executable(run_cbs app/main.cpp)
-
-# Link against required libraries
-target_link_libraries(run_cbs
-  ${Boost_LIBRARIES}
-  yaml-cpp
+# Header files
+set(HEADER_FILES
+    include/cbs/simulator.hpp
+    include/cbs/controller.hpp
+    include/cbs/common.hpp
 )
+
+# Executables
+add_executable(run_cbs src/cbs.cpp)
+
+add_executable(run_app
+    app/main.cpp
+    src/simulator.cpp
+    src/controller.cpp
+    ${HEADER_FILES}
+)
+
+# Includes
+target_include_directories(run_cbs PRIVATE include)
+target_include_directories(run_app PRIVATE include)
+
+# Linking
+target_link_libraries(run_cbs ${Boost_LIBRARIES} yaml-cpp)
+target_link_libraries(run_app ${Boost_LIBRARIES} yaml-cpp Qt5::Widgets)
