@@ -1,9 +1,4 @@
-#pragma once
-
-#include <map>
-#include "common.hpp"
-#include "a_star.hpp"
-
+#include "environment.hpp"
 
 namespace MultiRobotPlanning {
 

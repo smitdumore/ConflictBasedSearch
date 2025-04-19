@@ -16,7 +16,7 @@ set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 # Include the header files directory
 include_directories(include)
 
-add_executable(run_cbs src/cbs.cpp)
+add_executable(run_cbs app/main.cpp)
 
 # Link against required libraries
 target_link_libraries(run_cbs
