@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <QColor>
 #include <QTimer>
+#include <QPointF>  // <-- for smooth interpolation drawing
 #include <unordered_set>
 #include <vector>
 #include "common.hpp"
@@ -27,29 +28,39 @@ public slots:
     void stopAnimation();
     void updateTimeStep();
 
+signals:
+    void timeStepChanged(int timestep);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
 
 private:
+    // Drawing utilities
     QColor generateRandomColor() const;
     void drawFlag(QPainter& painter, const QRect& cell, const QColor& color) const;
-    State getAgentStateAtTime(size_t agentIdx, int timestep) const;
 
+    // Agent rendering helpers
+    State getAgentStateAtTime(size_t agentIdx, int timestep) const;
+    QPointF interpolatePosition(const State& start, const State& end, double alpha) const;
+
+    // Map state
     int dimX_, dimY_;
     std::unordered_set<Location> obstacles_;
     std::vector<State> agentStarts_;
     std::vector<Location> agentGoals_;
     std::vector<QColor> agentColors_;
-    
-    // Solution visualization
+
+    // Solution data
     std::vector<PlanResult<State, Action, int>> solution_;
-    bool hasValidSolution_;
-    int currentTimestep_;
-    int maxTimestep_;
-    
+    bool hasValidSolution_ = false;
+    int currentTimestep_ = 0;
+    int maxTimestep_ = 0;
+
     // Animation control
     QTimer* animationTimer_;
-    const int animationInterval_ = 500; // milliseconds between steps
-    
+    double interpolationAlpha_ = 0.0;
+    const int stepsPerTimestep_ = 5;
+    const int animationInterval_ = 100;
+
     const int cellSize_ = 50;
 };
