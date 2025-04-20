@@ -159,22 +159,134 @@ void Controller::connectSimulator(Simulator* sim) {
     });
 }
 
-// New slot for handling agent dragging
+// Slot for handling agent dragging
 void Controller::onAgentDragged(int agentIdx, State newState) {
     qDebug() << "Agent" << agentIdx << "dragged to position (" 
              << newState.x << "," << newState.y << ") at time" << currentTimestep_;
     
-    // Show a message that the simulation is ending
-    simulator_->showReplanningWarning("Agent dragged - Simulation ending...");
+    // Store the current timestep for reference
+    int dragTimestep = currentTimestep_;
     
-    // Stop the animation
+    // Stop the animation while we replan
     simulator_->stopAnimation();
     
-    // Schedule the application to exit after a short delay
-    QTimer::singleShot(2000, []() {
-        qDebug() << "Exiting application after agent drag";
-        QApplication::exit(0);
-    });
+    // Replan with the new agent position
+    if (replanFromCurrentStates(agentIdx, newState)) {
+        qDebug() << "Successfully replanned after agent drag";
+        
+        // Update the simulator with the new solution - this will adjust the timestep
+        simulator_->visualizeSolution(solution_);
+        
+        // Start animation from the current timestep
+        simulator_->startAnimation();
+    } else {
+        qDebug() << "Failed to replan after agent drag";
+        
+        // Show warning message to the user
+        simulator_->showReplanningWarning("Failed to find a new path. Agent returned to original position.");
+        
+        // Resume animation from the original position
+        simulator_->startAnimation();
+    }
+}
+
+bool Controller::replanFromCurrentStates(int draggedAgentIdx, State newDraggedState) {
+    if (!planner_ || !simulator_) {
+        qDebug() << "Can't replan: planner or simulator not initialized";
+        return false;
+    }
+    
+    qDebug() << "===== Starting Replanning =====";
+    qDebug() << "Current timestep:" << currentTimestep_;
+    qDebug() << "Dragged agent:" << draggedAgentIdx << "to position (" 
+             << newDraggedState.x << "," << newDraggedState.y << ")";
+    
+    // The key issue: When we replan, we need to:
+    // 1. Use time=0 for all new start states (the planner expects this)
+    // 2. Ensure we're using the exact current positions
+
+    // Create a new vector for start states
+    std::vector<State> newStartStates;
+    
+    // Get current positions of all agents
+    for (size_t i = 0; i < solution_.size(); i++) {
+        if (static_cast<int>(i) == draggedAgentIdx) {
+            // Use the new position for the dragged agent
+            int x = std::max(0, std::min(newDraggedState.x, dimX_ - 1));
+            int y = std::max(0, std::min(newDraggedState.y, dimY_ - 1));
+            newStartStates.push_back(State(0, x, y));  // Always use time=0 for planning
+            qDebug() << "Agent" << i << "(dragged) replanning from (" << x << "," << y << ")";
+        } else {
+            // For other agents, get current position directly from the solution at current timestep
+            State current(-1, -1, -1);
+            
+            // Find the state nearest to the current timestep
+            for (const auto& [state, time] : solution_[i].states) {
+                if (time <= currentTimestep_) {
+                    current = state;
+                } else {
+                    break;  // We've passed the current timestep
+                }
+            }
+            
+            // Sanity check - if we couldn't find a state, use the first one
+            if (current.x == -1 && current.y == -1) {
+                if (!solution_[i].states.empty()) {
+                    current = solution_[i].states.front().first;
+                } else {
+                    current = starts_[i];  // Fallback to original start
+                }
+            }
+            
+            // Create a new state with time=0 for planning
+            newStartStates.push_back(State(0, current.x, current.y));
+            qDebug() << "Agent" << i << "replanning from (" << current.x << "," << current.y << ")";
+        }
+    }
+    
+    // Verify no agents are at the same position
+    for (size_t i = 0; i < newStartStates.size(); i++) {
+        for (size_t j = i + 1; j < newStartStates.size(); j++) {
+            if (newStartStates[i].x == newStartStates[j].x && newStartStates[i].y == newStartStates[j].y) {
+                qDebug() << "Replanning failed: Agents" << i << "and" << j 
+                         << "are at the same position (" 
+                         << newStartStates[i].x << "," << newStartStates[i].y << ")";
+                return false;
+            }
+        }
+    }
+    
+    // Ensure no agents are on obstacles
+    for (size_t i = 0; i < newStartStates.size(); i++) {
+        if (obstacles_.find(Location(newStartStates[i].x, newStartStates[i].y)) != obstacles_.end()) {
+            qDebug() << "Replanning failed: Agent" << i << "is on an obstacle at (" 
+                     << newStartStates[i].x << "," << newStartStates[i].y << ")";
+            return false;
+        }
+    }
+    
+    // Create a fresh environment and planner with the same goals
+    bool disappearAtGoal = false;
+    int spaceSlack = 2;
+    int maxNodes = 10000;
+    
+    // Re-initialize the environment with the same settings but current positions
+    environment_ = std::make_unique<Environment>(dimX_, dimY_, obstacles_, goals_, disappearAtGoal, spaceSlack);
+    planner_ = std::make_unique<CBS<State, Action, int, Conflict, Constraints, Environment>>(*environment_, maxNodes);
+    
+    // Try to plan with the new start positions
+    std::vector<PlanResult<State, Action, int>> newSolution;
+    qDebug() << "Replanning paths from current positions...";
+    bool success = planner_->search(newStartStates, newSolution);
+    
+    if (success) {
+        qDebug() << "Successfully replanned!";
+        solution_ = newSolution;
+        return true;
+    }
+    
+    qDebug() << "Failed to replan!";
+    return false;
 }
 
 // Accessors

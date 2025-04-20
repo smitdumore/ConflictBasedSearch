@@ -38,6 +38,9 @@ public slots:
     void onAgentDragged(int agentIdx, State newState);
 
 private:
+    // Helper method for replanning after an agent is dragged
+    bool replanFromCurrentStates(int draggedAgentIdx = -1, State newDraggedState = State(-1, -1, -1));
+    
     // Map + agent data
     Simulator* simulator_;
     std::vector<State> starts_;

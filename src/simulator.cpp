@@ -3,6 +3,7 @@
 #include <QTimer>
 #include <QMouseEvent>
 #include <algorithm> 
+#include <QDebug>
 
 #include "cbs/simulator.hpp"
 
@@ -84,13 +85,30 @@ void Simulator::setAgents(const std::vector<State>& starts, const std::vector<Lo
 void Simulator::visualizeSolution(const std::vector<PlanResult<State, Action, int>>& solution) {
     solution_ = solution;
     hasValidSolution_ = true;
+    
+    // After replanning, the new solution starts at time 0, but we need to adjust it to 
+    // appear to continue from the current time step
+    if (currentTimestep_ > 0) {
+        qDebug() << "Adjusting solution time from current timestep:" << currentTimestep_;
+        
+        // Create time-adjusted copies of all agent solutions
+        for (auto& agentSolution : solution_) {
+            // Shift all timestamps forward by currentTimestep_
+            for (auto& [state, time] : agentSolution.states) {
+                time += currentTimestep_;
+            }
+        }
+    }
+    
+    // Find the maximum timestep across all agent paths
     maxTimestep_ = 0;
-
-    for (const auto& plan : solution_)
-        if (!plan.states.empty())
+    for (const auto& plan : solution_) {
+        if (!plan.states.empty()) {
             maxTimestep_ = std::max(maxTimestep_, static_cast<int>(plan.states.back().second));
-
-    currentTimestep_ = 0;
+        }
+    }
+    
+    // Don't reset the currentTimestep_ - continue from where we were before
     interpolationAlpha_ = 0.0;
     update();
 }
@@ -124,16 +142,54 @@ void Simulator::updateTimeStep() {
 }
 
 State Simulator::findStateAtTime(const std::vector<PlanResult<State, Action, int>>& solution, int agentId, int timestep) const {
-    if (agentId < 0 || agentId >= static_cast<int>(solution.size())) return State(-1, -1, -1);
-    const auto& plan = solution[agentId];
-
-    for (const auto& [state, t] : plan.states) {
-        if (t == timestep) return state;
-        if (t > timestep) break;
+    if (agentId < 0 || agentId >= static_cast<int>(solution.size())) {
+        return State(-1, -1, -1);
     }
-
-    if (!plan.states.empty()) return plan.states.back().first;
-    return State(-1, -1, -1);
+    
+    const auto& plan = solution[agentId];
+    
+    // If the plan is empty, return an invalid state
+    if (plan.states.empty()) {
+        return State(-1, -1, -1);
+    }
+    
+    // If timestep is before the first state, return the first state
+    if (timestep <= plan.states.front().second) {
+        return plan.states.front().first;
+    }
+    
+    // If timestep is after the last state, return the last state
+    if (timestep >= plan.states.back().second) {
+        return plan.states.back().first;
+    }
+    
+    // Search for the exact state at the timestep
+    for (size_t i = 0; i < plan.states.size() - 1; ++i) {
+        const auto& [state1, t1] = plan.states[i];
+        const auto& [state2, t2] = plan.states[i + 1];
+        
+        if (t1 == timestep) {
+            // Exact match for timestep
+            return state1;
+        }
+        
+        if (t1 < timestep && t2 > timestep) {
+            // We're between two states, interpolate based on time
+            double ratio = static_cast<double>(timestep - t1) / (t2 - t1);
+            int x = state1.x + static_cast<int>(ratio * (state2.x - state1.x));
+            int y = state1.y + static_cast<int>(ratio * (state2.y - state1.y));
+            
+            return State(timestep, x, y);
+        }
+    }
+    
+    // If we get here, check if the last state matches
+    if (plan.states.back().second == timestep) {
+        return plan.states.back().first;
+    }
+    
+    // Fallback to the last state (this should not happen with proper data)
+    return plan.states.back().first;
 }
 
 QPointF Simulator::interpolatePosition(const State& start, const State& end, double alpha) const {
@@ -243,14 +299,7 @@ void Simulator::mousePressEvent(QMouseEvent* event) {
 
 void Simulator::mouseMoveEvent(QMouseEvent* event) {
     if (draggedAgentIdx_ >= 0) {
-        // Calculate the new position with the drag offset
-        QPointF adjustedPos = event->pos() + dragOffset_;
-        
-        // Convert to grid coordinates
-        State newState = gridPositionToState(adjustedPos);
-        
-        // Always update when dragging, regardless of validity 
-        // (we're just exiting, not replanning)
+        // Just update the UI when dragging, we'll calculate positions in paintEvent
         update();
     }
     
@@ -261,10 +310,19 @@ void Simulator::mouseReleaseEvent(QMouseEvent* event) {
     if (draggedAgentIdx_ >= 0) {
         // Calculate final position
         QPointF adjustedPos = event->pos() + dragOffset_;
+        
+        // Convert to grid coordinates and snap to the closest cell
         State newState = gridPositionToState(adjustedPos);
         
-        // Emit signal with new agent position
-        emit agentDragged(draggedAgentIdx_, newState);
+        // Check if position is valid (not an obstacle and within grid)
+        if (isValidPosition(newState.x, newState.y)) {
+            // Emit signal with new agent position for controller to handle replanning
+            emit agentDragged(draggedAgentIdx_, newState);
+        } else {
+            // If invalid position, show a warning and resume animation
+            showReplanningWarning("Invalid position! Agent returned to original position.");
+            startAnimation();
+        }
         
         // Reset drag state
         draggedAgentIdx_ = -1;
@@ -306,21 +364,42 @@ void Simulator::paintEvent(QPaintEvent*) {
             if (draggedAgentIdx_ == static_cast<int>(i)) {
                 QPointF dragPos = QCursor::pos() - this->mapToGlobal(QPoint(0, 0)) + dragOffset_;
                 
-                // Use the actual cursor position for dragging, not the grid position
-                QPointF center = dragPos;
+                // Convert to grid coordinates for snapping
+                State dragState = gridPositionToState(dragPos);
                 
-                // Draw with slight transparency while dragging
-                QColor dragColor = agentColors_[i];
-                dragColor.setAlpha(180);
-                
-                painter.setBrush(dragColor);
-                painter.setPen(QPen(Qt::black, 2, Qt::DashLine));
-                painter.drawEllipse(center, cellSize_ * 0.3, cellSize_ * 0.3);
-                
-                painter.setPen(Qt::black);
-                painter.setFont(QFont("Arial", cellSize_ / 3));
-                painter.drawText(QRectF(center.x() - 10, center.y() - 10, 20, 20), 
-                                Qt::AlignCenter, QString::number(i));
+                // Only draw if valid position
+                if (isValidPosition(dragState.x, dragState.y)) {
+                    // Draw at the snapped grid position
+                    QPointF center(dragState.x * cellSize_ + cellSize_ / 2, 
+                                  dragState.y * cellSize_ + cellSize_ / 2);
+                    
+                    // Draw with slight transparency while dragging
+                    QColor dragColor = agentColors_[i];
+                    dragColor.setAlpha(180);
+                    
+                    painter.setBrush(dragColor);
+                    painter.setPen(QPen(Qt::black, 2, Qt::DashLine));
+                    painter.drawEllipse(center, cellSize_ * 0.3, cellSize_ * 0.3);
+                    
+                    painter.setPen(Qt::black);
+                    painter.setFont(QFont("Arial", cellSize_ / 3));
+                    painter.drawText(QRectF(center.x() - 10, center.y() - 10, 20, 20), 
+                                    Qt::AlignCenter, QString::number(i));
+                } else {
+                    // Draw with red outline at cursor position if invalid
+                    QPointF cursorPos = dragPos;
+                    
+                    QColor invalidColor = QColor(255, 80, 80, 180); // Semi-transparent red
+                    
+                    painter.setBrush(invalidColor);
+                    painter.setPen(QPen(Qt::red, 2, Qt::DashLine));
+                    painter.drawEllipse(cursorPos, cellSize_ * 0.3, cellSize_ * 0.3);
+                    
+                    painter.setPen(Qt::black);
+                    painter.setFont(QFont("Arial", cellSize_ / 3));
+                    painter.drawText(QRectF(cursorPos.x() - 10, cursorPos.y() - 10, 20, 20), 
+                                    Qt::AlignCenter, QString::number(i));
+                }
             } else {
                 // Draw normally for non-dragged agents
                 State currentState = findStateAtTime(solution_, i, currentTimestep_);
@@ -346,7 +425,7 @@ void Simulator::paintEvent(QPaintEvent*) {
     if (draggedAgentIdx_ >= 0) {
         painter.setPen(Qt::red);
         painter.setFont(QFont("Arial", 12, QFont::Bold));
-        painter.drawText(10, 40, QString("Dragging Agent %1 - Will Exit").arg(draggedAgentIdx_));
+        painter.drawText(10, 40, QString("Dragging Agent %1 - Will Replan").arg(draggedAgentIdx_));
     }
     
     // Draw warning message if it exists
