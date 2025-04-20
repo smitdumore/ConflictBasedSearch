@@ -17,7 +17,7 @@ public:
     bool loadMapFromYAML(const QString& filename);
     void connectSimulator(Simulator* sim);
     
-    //void triggerPlanner();
+    void triggerPlanner();
     void notifyMapChanged();
     void notifyUIFailure(const QString& reason);
 
@@ -35,7 +35,10 @@ private:
     std::vector<Location> goals_;
     std::vector<State> starts_;
 
-    //Planner* planner_;
+    // CBS Planner (with default parameters)
+    std::unique_ptr<Environment> environment_;
+    std::unique_ptr<CBS<State, Action, int, Conflict, Constraints, Environment>> planner_;
+    
     Simulator* simulator_;
 
     // Flags and errors

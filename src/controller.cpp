@@ -53,10 +53,18 @@ bool Controller::loadMapFromYAML(const QString& filename) {
             goals_.emplace_back(Location(gx, gy));
         }
 
+        // Initialize the CBS planner
+        bool disappearAtGoal = false;  // You can make this configurable if needed
+        int spaceSlack = 2;  // You can make this configurable if needed
+        int maxNodes = 10000;  // You can make this configurable if needed
+
+        environment_ = std::make_unique<Environment>(dimX_, dimY_, obstacles_, goals_, disappearAtGoal, spaceSlack);
+        planner_ = std::make_unique<CBS<State, Action, int, Conflict, Constraints, Environment>>(*environment_, maxNodes);
+
         qDebug() << "Map loaded successfully from:" << filename;
         return true;
 
-    } catch (const std::exception& e) {
+    } catch (const YAML::Exception& e) {
         qDebug() << "Failed to load YAML:" << e.what();
         return false;
     }
@@ -71,20 +79,30 @@ void Controller::notifyUIFailure(const QString& reason) {
     qDebug() << "UI failure reported:" << reason;
 }
 
-// void Controller::triggerPlanner() {
-//     if (!planner_ || !simulator_) return;
+void Controller::triggerPlanner() {
+    if (!planner_ || !simulator_) return;
 
-//     std::vector<PlanResult<State, Action, int>> plan;
-//     bool success = planner_->plan(starts_, goals_, obstacles_, plan);
+    std::vector<PlanResult<State, Action, int>> solution;
+    bool success = planner_->search(starts_, solution);
 
-//     if (!success) {
-//         qDebug() << "Planner failed to generate a plan.";
-//         return;
-//     }
+    if (!success) {
+        qDebug() << "Planner failed to generate a plan.";
+        return;
+    }
 
-//     simulator_->receiveNewPlan(plan);
-//     mapChanged_ = false;
-// }
+    // Calculate statistics
+    int cost = 0;
+    int makespan = 0;
+    for (const auto& s : solution) {
+        cost += s.cost;
+        makespan = std::max<int>(makespan, s.cost);
+    }
+    qDebug() << "Planning successful! Cost:" << cost << "Makespan:" << makespan;
+
+    // TODO: Add a method in Simulator to visualize the solution
+    // simulator_->visualizeSolution(solution);
+    mapChanged_ = false;
+}
 
 void Controller::connectSimulator(Simulator* sim) {
     simulator_ = sim;
