@@ -20,7 +20,7 @@ public:
     bool loadMapFromYAML(const QString& filename);
     void connectSimulator(Simulator* sim);
     
-    void triggerPlanner();
+    void runLoop();
     void notifyMapChanged();
     void notifyUIFailure(const QString& reason);
     void visualizeTimeStep(const std::vector<PlanResult<State, Action, int>>& solution, int timestep);

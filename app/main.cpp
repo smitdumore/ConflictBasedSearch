@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
 
     controller->loadMapFromYAML(mapPath);
     controller->connectSimulator(sim);
-    controller->triggerPlanner();  // initial plan
+    controller->runLoop();
  
     sim->show(); // Simulator is a QWidget  // QWidget::show()
     return app.exec();

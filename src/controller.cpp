@@ -80,7 +80,7 @@ void Controller::notifyUIFailure(const QString& reason) {
     qDebug() << "UI failure reported:" << reason;
 }
 
-void Controller::triggerPlanner() {
+void Controller::runLoop() {
     if (!planner_ || !simulator_) return;
 
     // Initial planning
