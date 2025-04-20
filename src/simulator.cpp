@@ -51,6 +51,9 @@ void Simulator::setMap(const std::vector<std::vector<bool>>& map) {
         for (int x = 0; x < dimX_; ++x)
             if (map[y][x]) obstacles_.insert(Location(x, y));
 
+    setFixedSize(dimX_ * cellSize_, dimY_ * cellSize_);
+    setMinimumSize(size());
+    setMaximumSize(size());
     update();
 }
 

@@ -5,7 +5,7 @@
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
 
-    QString mapPath = "../maps/map_5by5_obst_agents2.yaml";
+    QString mapPath = "../maps/corridor_test.yaml";
 
     Simulator* sim = new Simulator();
     Controller* controller = new Controller();
