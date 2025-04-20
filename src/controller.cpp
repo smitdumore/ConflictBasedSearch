@@ -3,9 +3,11 @@
 #include <yaml-cpp/yaml.h>
 #include <QDebug>
 #include <QThread>
+#include <QTimer>
+#include <QApplication>
 
 Controller::Controller(QObject* parent)
-    : QObject(parent), simulator_(nullptr), mapChanged_(false) {}
+    : QObject(parent), simulator_(nullptr), mapChanged_(false), currentTimestep_(0) {}
 
 bool Controller::loadMapFromYAML(const QString& filename) {
     try {
@@ -149,6 +151,30 @@ void Controller::connectSimulator(Simulator* sim) {
 
     simulator_->setMap(map);
     simulator_->setAgents(starts_, goals_);
+    
+    // Connect the agentDragged signal to our handler
+    connect(simulator_, &Simulator::agentDragged, this, &Controller::onAgentDragged);
+    connect(simulator_, &Simulator::timeStepChanged, this, [this](int timestep) {
+        currentTimestep_ = timestep;
+    });
+}
+
+// New slot for handling agent dragging
+void Controller::onAgentDragged(int agentIdx, State newState) {
+    qDebug() << "Agent" << agentIdx << "dragged to position (" 
+             << newState.x << "," << newState.y << ") at time" << currentTimestep_;
+    
+    // Show a message that the simulation is ending
+    simulator_->showReplanningWarning("Agent dragged - Simulation ending...");
+    
+    // Stop the animation
+    simulator_->stopAnimation();
+    
+    // Schedule the application to exit after a short delay
+    QTimer::singleShot(2000, []() {
+        qDebug() << "Exiting application after agent drag";
+        QApplication::exit(0);
+    });
 }
 
 // Accessors

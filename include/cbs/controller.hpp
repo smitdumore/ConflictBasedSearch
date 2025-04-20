@@ -33,6 +33,10 @@ public:
     int getDimX() const;
     int getDimY() const;
 
+public slots:
+    // Slot to handle agent dragging
+    void onAgentDragged(int agentIdx, State newState);
+
 private:
     // Map + agent data
     Simulator* simulator_;

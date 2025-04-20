@@ -22,6 +22,14 @@ public:
     void visualizeSolution(const std::vector<PlanResult<State, Action, int>>& solution);
     void visualizeTimeStep(const std::vector<PlanResult<State, Action, int>>& solution, int timestep);
     State findStateAtTime(const std::vector<PlanResult<State, Action, int>>& solution, int agentId, int timestep) const;
+    
+    // Methods for drag and drop
+    bool isDraggingAgent() const { return draggedAgentIdx_ >= 0; }
+    int getDraggedAgentIdx() const { return draggedAgentIdx_; }
+    State getDraggedAgentState() const;
+    
+    // Method to show a warning message when replanning fails
+    void showReplanningWarning(const QString& message);
 
 public slots:
     void startAnimation();
@@ -30,9 +38,15 @@ public slots:
 
 signals:
     void timeStepChanged(int timestep);
+    void agentDragged(int agentIdx, State newState);  // Signal for agent dragging
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    
+    // Mouse event handlers for dragging
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
 
 private:
     // Drawing utilities
@@ -42,6 +56,11 @@ private:
     // Agent rendering helpers
     State getAgentStateAtTime(size_t agentIdx, int timestep) const;
     QPointF interpolatePosition(const State& start, const State& end, double alpha) const;
+    
+    // Helper methods for agent dragging
+    int findAgentAtPosition(const QPoint& pos) const;
+    State gridPositionToState(const QPointF& pos) const;
+    bool isValidPosition(int x, int y) const;
 
     // Map state
     int dimX_, dimY_;
@@ -59,8 +78,17 @@ private:
     // Animation control
     QTimer* animationTimer_;
     double interpolationAlpha_ = 0.0;
-    const int stepsPerTimestep_ = 5;
-    const int animationInterval_ = 100;
+    const int stepsPerTimestep_ = 20;
+    const int animationInterval_ = 150;
+
+    // Drag and drop state
+    int draggedAgentIdx_ = -1;   // -1 means no agent is being dragged
+    QPointF dragOffset_;         // Offset from agent center to drag point
+    State draggedAgentOrigState_; // Original state before dragging
+    
+    // Warning message state
+    QString warningMessage_;
+    QTimer* warningTimer_;
 
     const int cellSize_ = 50;
 };
