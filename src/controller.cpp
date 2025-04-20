@@ -95,6 +95,7 @@ void Controller::connectSimulator(Simulator* sim) {
     }
 
     simulator_->setMap(dimX_, dimY_, obstacles_);
+    simulator_->setAgents(starts_, goals_);
 }
 
 // Accessors
