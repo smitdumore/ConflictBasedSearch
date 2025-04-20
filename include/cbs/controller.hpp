@@ -3,8 +3,11 @@
 #include <QObject>
 #include <QString>
 #include <vector>
+#include <memory>
 #include <unordered_set>
 #include "cbs/cbs.hpp"
+
+using namespace MultiRobotPlanning;
 
 class Simulator;  // Forward declaration
 
@@ -20,6 +23,8 @@ public:
     void triggerPlanner();
     void notifyMapChanged();
     void notifyUIFailure(const QString& reason);
+    void visualizeTimeStep(const std::vector<PlanResult<State, Action, int>>& solution, int timestep);
+    State getCurrentState(int agentId) const;
 
     // Accessors for planner
     const std::vector<State>& getAgentStarts() const;
@@ -30,18 +35,16 @@ public:
 
 private:
     // Map + agent data
-    int dimX_, dimY_;
-    std::unordered_set<Location> obstacles_;
-    std::vector<Location> goals_;
-    std::vector<State> starts_;
-
-    // CBS Planner (with default parameters)
-    std::unique_ptr<Environment> environment_;
-    std::unique_ptr<CBS<State, Action, int, Conflict, Constraints, Environment>> planner_;
-    
     Simulator* simulator_;
-
-    // Flags and errors
+    std::vector<State> starts_;
+    std::vector<Location> goals_;
+    std::unordered_set<Location> obstacles_;
+    int dimX_;
+    int dimY_;
     bool mapChanged_;
     QString lastUIError_;
+    std::unique_ptr<Environment> environment_;
+    std::unique_ptr<CBS<State, Action, int, Conflict, Constraints, Environment>> planner_;
+    std::vector<PlanResult<State, Action, int>> solution_;
+    int currentTimestep_;
 };

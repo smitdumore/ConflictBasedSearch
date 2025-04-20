@@ -2,6 +2,7 @@
 #include "cbs/simulator.hpp"
 #include <yaml-cpp/yaml.h>
 #include <QDebug>
+#include <QThread>
 
 Controller::Controller(QObject* parent)
     : QObject(parent), simulator_(nullptr), mapChanged_(false) {}
@@ -82,26 +83,52 @@ void Controller::notifyUIFailure(const QString& reason) {
 void Controller::triggerPlanner() {
     if (!planner_ || !simulator_) return;
 
-    std::vector<PlanResult<State, Action, int>> solution;
-    bool success = planner_->search(starts_, solution);
+    // Initial planning
+    solution_.clear();
+    bool success = planner_->search(starts_, solution_);
 
     if (!success) {
-        qDebug() << "Planner failed to generate a plan.";
+        qDebug() << "Initial planning failed";
         return;
     }
 
-    // Calculate statistics
-    int cost = 0;
+    // Find makespan (max time)
     int makespan = 0;
-    for (const auto& s : solution) {
-        cost += s.cost;
+    for (const auto& s : solution_) {
         makespan = std::max<int>(makespan, s.cost);
     }
-    qDebug() << "Planning successful! Cost:" << cost << "Makespan:" << makespan;
 
-    // TODO: Add a method in Simulator to visualize the solution
-    // simulator_->visualizeSolution(solution);
-    mapChanged_ = false;
+    // Send solution to simulator and start animation
+    simulator_->visualizeSolution(solution_);
+    simulator_->startAnimation();
+
+    // Connect to simulator's animation timer for replanning
+    //connect(simulator_, &Simulator::timeStepChanged, this, [this](int timestep) {
+        //currentTimestep_ = timestep;
+        
+        // Check if replanning needed
+        // if (mapChanged_) {
+        //     // Replan from current states
+        //     std::vector<State> currentStates;
+        //     for (size_t i = 0; i < solution_.size(); i++) {
+        //         currentStates.push_back(getCurrentState(i));
+        //     }
+
+        //     // Try replanning
+        //     std::vector<PlanResult<State, Action, int>> newSolution;
+        //     if (planner_->search(currentStates, newSolution)) {
+        //         solution_ = newSolution;
+        //         simulator_->visualizeSolution(solution_);
+        //         simulator_->startAnimation();
+        //     }
+        //     mapChanged_ = false;
+        // }
+    //});
+}
+
+State Controller::getCurrentState(int agentId) const {
+    if (!simulator_) return State(-1, -1, -1);
+    return simulator_->findStateAtTime(solution_, agentId, currentTimestep_);
 }
 
 void Controller::connectSimulator(Simulator* sim) {
@@ -112,7 +139,15 @@ void Controller::connectSimulator(Simulator* sim) {
         return;
     }
 
-    simulator_->setMap(dimX_, dimY_, obstacles_);
+    // Convert obstacles to 2D boolean grid
+    std::vector<std::vector<bool>> map(dimY_, std::vector<bool>(dimX_, false));
+    for (const auto& obs : obstacles_) {
+        if (obs.x >= 0 && obs.x < dimX_ && obs.y >= 0 && obs.y < dimY_) {
+            map[obs.y][obs.x] = true;
+        }
+    }
+
+    simulator_->setMap(map);
     simulator_->setAgents(starts_, goals_);
 }
 

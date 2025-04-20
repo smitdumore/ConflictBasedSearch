@@ -1,11 +1,17 @@
 #include <QPainter>
 #include <QRandomGenerator>
+#include <QTimer>
 
 #include "cbs/simulator.hpp"
 
 Simulator::Simulator(QWidget* parent)
-    : QWidget(parent), dimX_(0), dimY_(0) {
+    : QWidget(parent), dimX_(0), dimY_(0), 
+      hasValidSolution_(false), currentTimestep_(0), maxTimestep_(0) {
     setWindowTitle("CBS Simulator");
+    
+    // Setup animation timer
+    animationTimer_ = new QTimer(this);
+    connect(animationTimer_, &QTimer::timeout, this, &Simulator::updateTimeStep);
 }
 
 QColor Simulator::generateRandomColor() const {
@@ -39,31 +45,113 @@ QColor Simulator::generateRandomColor() const {
     return QColor(r, g, b);
 }
 
-void Simulator::setMap(int dimX, int dimY, const std::unordered_set<Location>& obstacles) {
-    if (dimX <= 0 || dimY <= 0 || dimX > 1000 || dimY > 1000) {
-        qWarning("Simulator::setMap received invalid grid size: (%d, %d)", dimX, dimY);
+void Simulator::setMap(const std::vector<std::vector<bool>>& map) {
+    if (map.empty() || map[0].empty()) {
+        qWarning("Simulator::setMap received empty map");
         return;
     }
-
-    dimX_ = dimX;
-    dimY_ = dimY;
-    obstacles_ = obstacles;
-
-    setFixedSize(dimX_ * cellSize_, dimY_ * cellSize_);
+    
+    dimX_ = map[0].size();
+    dimY_ = map.size();
+    
+    if (dimX_ > 1000 || dimY_ > 1000) {
+        qWarning("Simulator::setMap received invalid grid size: (%d, %d)", dimX_, dimY_);
+        return;
+    }
+    
+    // Convert map to obstacles set
+    obstacles_.clear();
+    for (int y = 0; y < dimY_; ++y) {
+        for (int x = 0; x < dimX_; ++x) {
+            if (map[y][x]) {
+                obstacles_.insert(Location(x, y));
+            }
+        }
+    }
+    
     update();
 }
 
 void Simulator::setAgents(const std::vector<State>& starts, const std::vector<Location>& goals) {
+    if (starts.size() != goals.size()) {
+        qWarning("Simulator::setAgents received mismatched starts and goals sizes");
+        return;
+    }
+    
     agentStarts_ = starts;
     agentGoals_ = goals;
-    
-    // Generate random colors for agents
     agentColors_.clear();
+    
+    // Generate colors for agents
     for (size_t i = 0; i < starts.size(); ++i) {
         agentColors_.push_back(generateRandomColor());
     }
     
     update();
+}
+
+void Simulator::visualizeSolution(const std::vector<PlanResult<State, Action, int>>& solution) {
+    solution_ = solution;
+    hasValidSolution_ = true;
+    
+    // Find maximum timestep (makespan)
+    maxTimestep_ = 0;
+    for (const auto& agentPlan : solution_) {
+        if (!agentPlan.states.empty()) {
+            maxTimestep_ = std::max(maxTimestep_, 
+                                  static_cast<int>(agentPlan.states.back().second));
+        }
+    }
+    
+    // Reset visualization
+    currentTimestep_ = 0;
+    update();
+}
+
+void Simulator::startAnimation() {
+    if (!hasValidSolution_) return;
+    currentTimestep_ = 0;
+    animationTimer_->start(animationInterval_);
+}
+
+void Simulator::stopAnimation() {
+    animationTimer_->stop();
+}
+
+void Simulator::updateTimeStep() {
+    if (!hasValidSolution_) return;
+    
+    currentTimestep_++;
+    if (currentTimestep_ > maxTimestep_) {
+        stopAnimation();
+        currentTimestep_ = maxTimestep_;
+    }
+    update();
+}
+
+State Simulator::getAgentStateAtTime(size_t agentIdx, int timestep) const {
+    if (!hasValidSolution_ || agentIdx >= solution_.size()) {
+        return agentStarts_[agentIdx]; // Return start position if no solution
+    }
+
+    const auto& agentPlan = solution_[agentIdx];
+    
+    // Find the state at or before the current timestep
+    for (const auto& state : agentPlan.states) {
+        if (state.second == timestep) {
+            return state.first;
+        }
+        if (state.second > timestep) {
+            break;
+        }
+    }
+    
+    // If we're past the last state, return the final position
+    if (!agentPlan.states.empty()) {
+        return agentPlan.states.back().first;
+    }
+    
+    return agentStarts_[agentIdx];
 }
 
 void Simulator::drawFlag(QPainter& painter, const QRect& cell, const QColor& color) const {
@@ -94,6 +182,47 @@ void Simulator::drawFlag(QPainter& painter, const QRect& cell, const QColor& col
     painter.drawPolygon(flag);
 }
 
+void Simulator::visualizeTimeStep(const std::vector<PlanResult<State, Action, int>>& solution, int timestep) {
+    solution_ = solution;
+    currentTimestep_ = timestep;
+    
+    // Calculate max timestep (makespan)
+    maxTimestep_ = 0;
+    for (const auto& plan : solution_) {
+        if (!plan.states.empty()) {
+            maxTimestep_ = std::max(maxTimestep_, static_cast<int>(plan.states.back().second));
+        }
+    }
+
+    hasValidSolution_ = true;
+    update(); // Trigger paintEvent() 
+}
+
+State Simulator::findStateAtTime(const std::vector<PlanResult<State, Action, int>>& solution, int agentId, int timestep) const {
+    if (agentId < 0 || agentId >= static_cast<int>(solution.size())) {
+        return State(-1, -1, -1);  // Invalid state
+    }
+    
+    const auto& plan = solution[agentId];
+    
+    // Find the state at the given timestep
+    for (const auto& [state, t] : plan.states) {
+        if (t == timestep) {
+            return state;
+        }
+        if (t > timestep) {
+            break;
+        }
+    }
+    
+    // If we didn't find the exact timestep, return the last state
+    if (!plan.states.empty()) {
+        return plan.states.back().first;
+    }
+    
+    return State(-1, -1, -1);  // Invalid state
+}
+
 void Simulator::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
@@ -114,32 +243,42 @@ void Simulator::paintEvent(QPaintEvent*) {
         }
     }
 
-    // Draw agents and their goals
+    // Draw agents at their current positions
     for (size_t i = 0; i < agentStarts_.size(); ++i) {
         const QColor& agentColor = agentColors_[i];
         
-        // Draw start position (dotted circle)
-        const State& start = agentStarts_[i];
-        QRect startCell(start.x * cellSize_, start.y * cellSize_, cellSize_, cellSize_);
+        // Get current state from solution
+        State currentState = agentStarts_[i];  // Initialize with start state
+        if (i < solution_.size()) {
+            currentState = findStateAtTime(solution_, i, currentTimestep_);
+        }
+
+        QRect currentCell(currentState.x * cellSize_, 
+                         currentState.y * cellSize_, 
+                         cellSize_, cellSize_);
         
         // Draw filled circle with agent color
         painter.setPen(Qt::NoPen);
         painter.setBrush(agentColor);
-        painter.drawEllipse(startCell.center(), cellSize_/3, cellSize_/3);
+        painter.drawEllipse(currentCell.center(), cellSize_/3, cellSize_/3);
         
         // Draw agent number in black
         painter.setPen(Qt::black);
         painter.setFont(QFont("Arial", cellSize_/3));
-        painter.drawText(startCell, Qt::AlignCenter, QString::number(i));
+        painter.drawText(currentCell, Qt::AlignCenter, QString::number(i));
 
-        // Draw goal position if available
+        // Draw goal position
         if (i < agentGoals_.size()) {
             const Location& goal = agentGoals_[i];
-            QRect goalCell(goal.x * cellSize_, goal.y * cellSize_, cellSize_, cellSize_);
-            
-            // Draw flag at goal position
+            QRect goalCell(goal.x * cellSize_, goal.y * cellSize_, 
+                         cellSize_, cellSize_);
             drawFlag(painter, goalCell, agentColor);
         }
     }
+
+    // Draw timestep counter
+    painter.setPen(Qt::black);
+    painter.setFont(QFont("Arial", 12));
+    painter.drawText(10, 20, QString("Time: %1").arg(currentTimestep_));
 }
 

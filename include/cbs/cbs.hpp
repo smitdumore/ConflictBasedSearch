@@ -92,6 +92,8 @@ class CBS {
 
   bool search(const std::vector<State>& initialStates,
               std::vector<PlanResult<State, Action, Cost> >& solution) {
+    
+    std::cout << "CALEED CBS SAERCH\n";
 
     /******** Root of the conflict tree *********/ 
     // Every conflict tree node is a snapshot of time
