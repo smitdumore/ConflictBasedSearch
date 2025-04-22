@@ -1,0 +1,90 @@
+#pragma once
+
+#include <vector>
+#include <memory>
+#include <string>
+#include <chrono>
+#include "common.hpp"
+#include "planresult.hpp"
+#include "environment.hpp"
+#include "cbs.hpp"
+#include "simulator.hpp"
+#include <yaml-cpp/yaml.h>
+
+/**
+ * The UI class manages the core simulation loop and state.
+ * It coordinates between the planner (CBS) and visualization (Simulator).
+ */
+class UI {
+public:
+    UI();
+    ~UI();
+
+    // Setup
+    bool loadMapFromYAML(const std::string& filename);
+    bool initialize();
+    
+    // Main loop
+    void run();
+    bool update(float deltaTime);
+    void render();
+    
+    // Control
+    void pause();
+    void resume();
+    void reset();
+    void stop();
+    bool isRunning() const { return running_; }
+    bool isPaused() const { return paused_; }
+    
+    // Time control
+    void setTimeMultiplier(float multiplier) { timeMultiplier_ = multiplier; }
+    float getTimeMultiplier() const { return timeMultiplier_; }
+    
+    // Timestep accessors
+    int getCurrentTimestep() const { return currentTimestep_; }
+    int getMaxTimestep() const { return maxTimestep_; }
+    
+    // Agent interaction
+    bool dragAgent(int agentIdx, int x, int y);
+    
+private:
+    // Simulation state
+    bool running_;
+    bool paused_;
+    float timeMultiplier_;
+    float secondsPerTimestep_;
+    float timeAccumulator_;
+    
+    // Timestep tracking
+    int currentTimestep_;
+    float interpolationAlpha_;
+    int maxTimestep_;
+    
+    // Map data
+    int dimX_;
+    int dimY_;
+    std::unordered_set<Location> obstacles_;
+    std::vector<State> starts_;
+    std::vector<Location> goals_;
+    
+    // Planning components
+    std::unique_ptr<Environment> environment_;
+    std::unique_ptr<CBS<State, Action, int, Conflict, Constraints, Environment>> planner_;
+    std::vector<PlanResult<State, Action, int>> solution_;
+    
+    // Visualization
+    std::unique_ptr<Simulator> simulator_;
+    
+    // Agent handling
+    int draggedAgentIdx_;
+    
+    // Methods
+    bool computeInitialPlan();
+    bool replanFromCurrentStates(int draggedAgentIdx = -1, State newDraggedState = State(-1, -1, -1));
+    State getCurrentAgentPosition(size_t agentIdx) const;
+    bool validateAgentPositions(const std::vector<State>& positions) const;
+    void resetSimulation();
+    void processEvents();
+    bool handleAgentDrag(int agentIdx, int x, int y);
+}; 

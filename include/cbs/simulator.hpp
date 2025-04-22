@@ -1,94 +1,86 @@
 #pragma once
 
-#include <QWidget>
-#include <QColor>
-#include <QTimer>
-#include <QPointF>  // <-- for smooth interpolation drawing
+#include <SFML/Graphics.hpp>
 #include <unordered_set>
 #include <vector>
+#include <string>
 #include "common.hpp"
 #include "planresult.hpp"
 
 using namespace MultiRobotPlanning;
 
-class Simulator : public QWidget {
-    Q_OBJECT
-
+/**
+ * The Simulator class handles visualization of the map, agents, and paths.
+ * It uses SFML for rendering and provides a simple interface for the main simulation loop.
+ */
+class Simulator {
 public:
-    Simulator(QWidget* parent = nullptr);
+    Simulator();
+    ~Simulator();
 
+    // Window management
+    bool createWindow(int width, int height, const std::string& title);
+    void closeWindow();
+    bool isWindowOpen() const;
+    void processEvents();
+    
+    // Map and agent setup
     void setMap(const std::vector<std::vector<bool>>& map);
     void setAgents(const std::vector<State>& starts, const std::vector<Location>& goals);
-    void visualizeSolution(const std::vector<PlanResult<State, Action, int>>& solution);
-    void visualizeTimeStep(const std::vector<PlanResult<State, Action, int>>& solution, int timestep);
-    State findStateAtTime(const std::vector<PlanResult<State, Action, int>>& solution, int agentId, int timestep) const;
     
-    // Methods for drag and drop
-    bool isDraggingAgent() const { return draggedAgentIdx_ >= 0; }
-    int getDraggedAgentIdx() const { return draggedAgentIdx_; }
-    State getDraggedAgentState() const;
+    // Rendering methods
+    void clear();
+    void render(const std::vector<PlanResult<State, Action, int>>& solution, 
+                int currentTimestep, double interpolationAlpha);
+    void display();
     
-    // Method to show a warning message when replanning fails
-    void showReplanningWarning(const QString& message);
-
-public slots:
-    void startAnimation();
-    void stopAnimation();
-    void updateTimeStep();
-
-signals:
-    void timeStepChanged(int timestep);
-    void agentDragged(int agentIdx, State newState);  // Signal for agent dragging
-
-protected:
-    void paintEvent(QPaintEvent* event) override;
+    // Mouse interaction
+    bool checkAgentClick(int mouseX, int mouseY, int& outAgentIdx, 
+                        const std::vector<PlanResult<State, Action, int>>& solution,
+                        int currentTimestep);
+    sf::Vector2i getMousePosition() const;
     
-    // Mouse event handlers for dragging
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
+    // UI display
+    void showMessage(const std::string& message, float duration = 3.0f);
+    
+    // Utility methods
+    State findStateAtTime(const std::vector<PlanResult<State, Action, int>>& solution, 
+                         int agentId, int timestep) const;
+    bool isValidPosition(int x, int y) const;
+    sf::Vector2f worldToScreen(float x, float y) const;
+    sf::Vector2i screenToWorld(int x, int y) const;
 
 private:
-    // Drawing utilities
-    QColor generateRandomColor() const;
-    void drawFlag(QPainter& painter, const QRect& cell, const QColor& color) const;
-
-    // Agent rendering helpers
-    State getAgentStateAtTime(size_t agentIdx, int timestep) const;
-    QPointF interpolatePosition(const State& start, const State& end, double alpha) const;
+    // SFML window and rendering
+    sf::RenderWindow window_;
+    sf::Font font_;
+    sf::Clock messageClock_;
     
-    // Helper methods for agent dragging
-    int findAgentAtPosition(const QPoint& pos) const;
-    State gridPositionToState(const QPointF& pos) const;
-    bool isValidPosition(int x, int y) const;
-
-    // Map state
-    int dimX_, dimY_;
+    // Drawing helpers
+    void drawGrid();
+    void drawObstacles();
+    void drawGoals();
+    void drawAgents(const std::vector<PlanResult<State, Action, int>>& solution, 
+                   int currentTimestep, double interpolationAlpha);
+    void drawUI(int currentTimestep);
+    void drawMessage();
+    sf::Color generateRandomColor() const;
+    
+    // Utility methods
+    sf::Vector2f interpolatePosition(const State& start, const State& end, double alpha) const;
+    
+    // Map data
+    int dimX_;
+    int dimY_;
     std::unordered_set<Location> obstacles_;
     std::vector<State> agentStarts_;
     std::vector<Location> agentGoals_;
-    std::vector<QColor> agentColors_;
-
-    // Solution data
-    std::vector<PlanResult<State, Action, int>> solution_;
-    bool hasValidSolution_ = false;
-    int currentTimestep_ = 0;
-    int maxTimestep_ = 0;
-
-    // Animation control
-    QTimer* animationTimer_;
-    double interpolationAlpha_ = 0.0;
-    const int stepsPerTimestep_ = 20;
-    const int animationInterval_ = 150;
-
-    // Drag and drop state
-    int draggedAgentIdx_ = -1;   // -1 means no agent is being dragged
-    QPointF dragOffset_;         // Offset from agent center to drag point
-    State draggedAgentOrigState_; // Original state before dragging
+    std::vector<sf::Color> agentColors_;
     
-    // Warning message state
-    QString warningMessage_;
-    QTimer* warningTimer_;
-
+    // UI state
+    std::string message_;
+    float messageTimeRemaining_;
+    
+    // Constants
     const int cellSize_ = 50;
 };

@@ -14,12 +14,15 @@ find_package(Boost 1.58 REQUIRED COMPONENTS program_options)
 find_package(PkgConfig)
 pkg_check_modules(YamlCpp yaml-cpp)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
+find_package(SFML 2.5 COMPONENTS system window graphics)
+find_package(Threads REQUIRED)
 
 # Header files
 set(HEADER_FILES
     include/cbs/simulator.hpp
-    include/cbs/controller.hpp
     include/cbs/common.hpp
+    # simulation.hpp has been removed as we've migrated to UI
+    include/cbs/ui.hpp
 )
 
 # Executables
@@ -28,7 +31,8 @@ add_executable(run_cbs src/cbs.cpp)
 add_executable(run_app
     app/main.cpp
     src/simulator.cpp
-    src/controller.cpp
+    # simulation.cpp has been removed as we've migrated to UI
+    src/ui.cpp
     ${HEADER_FILES}
 )
 
@@ -38,4 +42,4 @@ target_include_directories(run_app PRIVATE include)
 
 # Linking
 target_link_libraries(run_cbs ${Boost_LIBRARIES} yaml-cpp)
-target_link_libraries(run_app ${Boost_LIBRARIES} yaml-cpp Qt5::Widgets)
+target_link_libraries(run_app ${Boost_LIBRARIES} yaml-cpp Qt5::Widgets sfml-system sfml-window sfml-graphics ${CMAKE_THREAD_LIBS_INIT})

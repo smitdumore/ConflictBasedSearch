@@ -1,144 +1,168 @@
-#include <QPainter>
-#include <QRandomGenerator>
-#include <QTimer>
-#include <QMouseEvent>
-#include <algorithm> 
-#include <QDebug>
-
 #include "cbs/simulator.hpp"
+#include <iostream>
+#include <random>
 
-Simulator::Simulator(QWidget* parent)
-    : QWidget(parent), dimX_(0), dimY_(0),
-      hasValidSolution_(false), currentTimestep_(0), maxTimestep_(0),
-      interpolationAlpha_(0.0), stepsPerTimestep_(20), animationInterval_(150),
-      draggedAgentIdx_(-1), draggedAgentOrigState_(-1, -1, -1) {
-
-    setWindowTitle("CBS Simulator");
-    setMouseTracking(true);  // Enable mouse tracking for smooth dragging
-
-    animationTimer_ = new QTimer(this);
-    connect(animationTimer_, &QTimer::timeout, this, &Simulator::updateTimeStep);
+Simulator::Simulator() 
+    : dimX_(0), dimY_(0), messageTimeRemaining_(0.0f) {
+    std::cout << "Simulator initialized" << std::endl;
     
-    // Initialize warning timer
-    warningTimer_ = new QTimer(this);
-    warningTimer_->setSingleShot(true);
-    connect(warningTimer_, &QTimer::timeout, this, [this]() {
-        warningMessage_.clear();
-        update();
-    });
+    // Load font for text rendering
+    if (!font_.loadFromFile("/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf")) {
+        std::cerr << "Warning: Failed to load font. Text rendering will be disabled." << std::endl;
+    }
 }
 
-QColor Simulator::generateRandomColor() const {
-    auto* rng = QRandomGenerator::global();
-    int r = rng->bounded(256), g = rng->bounded(256), b = rng->bounded(256);
-    const int minBrightness = 150, maxBrightness = 230;
-
-    int max_component = std::max({r, g, b});  
-    if (max_component < minBrightness) {
-        double scale = double(minBrightness) / max_component;
-        r = qMin(255, int(r * scale));
-        g = qMin(255, int(g * scale));
-        b = qMin(255, int(b * scale));
+Simulator::~Simulator() {
+    if (window_.isOpen()) {
+        window_.close();
     }
-    max_component = std::max({r, g, b});  
-    if (max_component > maxBrightness) {
-        double scale = double(maxBrightness) / max_component;
-        r = int(r * scale);
-        g = int(g * scale);
-        b = int(b * scale);
-    }
-
-    return QColor(r, g, b);
+    std::cout << "Simulator destroyed" << std::endl;
 }
 
 void Simulator::setMap(const std::vector<std::vector<bool>>& map) {
-    if (map.empty() || map[0].empty()) return;
-
-    dimX_ = map[0].size();
-    dimY_ = map.size();
-    if (dimX_ > 1000 || dimY_ > 1000) return;
-
-    obstacles_.clear();
-    for (int y = 0; y < dimY_; ++y)
-        for (int x = 0; x < dimX_; ++x)
-            if (map[y][x]) obstacles_.insert(Location(x, y));
-
-    setFixedSize(dimX_ * cellSize_, dimY_ * cellSize_);
-    setMinimumSize(size());
-    setMaximumSize(size());
-    update();
-}
-
-void Simulator::setAgents(const std::vector<State>& starts, const std::vector<Location>& goals) {
-    if (starts.size() != goals.size()) return;
-
-    agentStarts_ = starts;
-    agentGoals_ = goals;
-    agentColors_.clear();
-
-    for (size_t i = 0; i < starts.size(); ++i)
-        agentColors_.push_back(generateRandomColor());
-
-    update();
-}
-
-void Simulator::visualizeSolution(const std::vector<PlanResult<State, Action, int>>& solution) {
-    solution_ = solution;
-    hasValidSolution_ = true;
+    if (map.empty() || map[0].empty()) {
+        std::cerr << "Error: Empty map provided to simulator" << std::endl;
+        return;
+    }
     
-    // After replanning, the new solution starts at time 0, but we need to adjust it to 
-    // appear to continue from the current time step
-    if (currentTimestep_ > 0) {
-        qDebug() << "Adjusting solution time from current timestep:" << currentTimestep_;
-        
-        // Create time-adjusted copies of all agent solutions
-        for (auto& agentSolution : solution_) {
-            // Shift all timestamps forward by currentTimestep_
-            for (auto& [state, time] : agentSolution.states) {
-                time += currentTimestep_;
+    dimY_ = map.size();
+    dimX_ = map[0].size();
+    obstacles_.clear();
+    
+    // Convert 2D grid to obstacle set
+    for (int y = 0; y < dimY_; ++y) {
+        for (int x = 0; x < dimX_; ++x) {
+            if (map[y][x]) {
+                obstacles_.insert(Location(x, y));
             }
         }
     }
     
-    // Find the maximum timestep across all agent paths
-    maxTimestep_ = 0;
-    for (const auto& plan : solution_) {
-        if (!plan.states.empty()) {
-            maxTimestep_ = std::max(maxTimestep_, static_cast<int>(plan.states.back().second));
+    std::cout << "Map set with dimensions " << dimX_ << "x" << dimY_ 
+              << " and " << obstacles_.size() << " obstacles" << std::endl;
+}
+
+void Simulator::setAgents(const std::vector<State>& starts, const std::vector<Location>& goals) {
+    agentStarts_ = starts;
+    agentGoals_ = goals;
+    
+    // Generate random colors for agents
+    agentColors_.clear();
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(50, 200);
+    
+    for (size_t i = 0; i < starts.size(); ++i) {
+        sf::Color color(distrib(gen), distrib(gen), distrib(gen));
+        agentColors_.push_back(color);
+    }
+    
+    std::cout << "Set " << starts.size() << " agents with goals" << std::endl;
+}
+
+bool Simulator::createWindow(int width, int height, const std::string& title) {
+    try {
+        // Create SFML window
+        window_.create(sf::VideoMode(width, height), title, sf::Style::Titlebar | sf::Style::Close);
+        window_.setFramerateLimit(60);
+        
+        std::cout << "Created window: " << width << "x" << height << " - " << title << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error creating window: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool Simulator::isWindowOpen() const {
+    return window_.isOpen();
+}
+
+void Simulator::render(const std::vector<PlanResult<State, Action, int>>& solution, int timestep, double alpha) {
+    if (!window_.isOpen()) return;
+    
+    window_.clear(sf::Color(240, 240, 240)); // Light gray background
+    
+    // Draw grid
+    drawGrid();
+    
+    // Draw obstacles
+    drawObstacles();
+    
+    // Draw goals
+    drawGoals();
+    
+    // Draw agents
+    drawAgents(solution, timestep, alpha);
+    
+    // Draw UI overlay
+    drawUI(timestep);
+    
+    // Draw any message
+    drawMessage();
+}
+
+void Simulator::display() {
+    if (window_.isOpen()) {
+        window_.display();
+    }
+}
+
+void Simulator::processEvents() {
+    if (!window_.isOpen()) return;
+    
+    sf::Event event;
+    while (window_.pollEvent(event)) {
+        if (event.type == sf::Event::Closed) {
+            window_.close();
         }
     }
     
-    // Don't reset the currentTimestep_ - continue from where we were before
-    interpolationAlpha_ = 0.0;
-    update();
+    // Update message timer
+    if (messageTimeRemaining_ > 0) {
+        messageTimeRemaining_ -= messageClock_.restart().asSeconds();
+    }
 }
 
-void Simulator::startAnimation() {
-    if (!hasValidSolution_) return;
-    currentTimestep_ = 0;
-    interpolationAlpha_ = 0.0;
-    animationTimer_->start(animationInterval_);
+sf::Vector2i Simulator::getMousePosition() const {
+    return sf::Mouse::getPosition(window_);
 }
 
-void Simulator::stopAnimation() {
-    animationTimer_->stop();
+sf::Vector2i Simulator::screenToWorld(int x, int y) const {
+    return sf::Vector2i(x / cellSize_, y / cellSize_);
 }
 
-void Simulator::updateTimeStep() {
-    if (!hasValidSolution_) return;
-
-    interpolationAlpha_ += 1.0 / stepsPerTimestep_;
-
-    if (interpolationAlpha_ >= 1.0) {
-        interpolationAlpha_ = 0.0;
-        currentTimestep_++;
-        if (currentTimestep_ > maxTimestep_) {
-            stopAnimation();
-            currentTimestep_ = maxTimestep_;
+bool Simulator::checkAgentClick(int x, int y, int& agentIdx, const std::vector<PlanResult<State, Action, int>>& solution, int timestep) {
+    for (size_t i = 0; i < solution.size(); ++i) {
+        State agentState = findStateAtTime(solution, i, timestep);
+        
+        // Convert agent position to screen coordinates
+        sf::Vector2f screenPos = worldToScreen(agentState.x, agentState.y);
+        
+        // Check if click is within agent circle (radius is cellSize_/3)
+        float radius = cellSize_ / 3.0f;
+        float dx = screenPos.x + radius - x;
+        float dy = screenPos.y + radius - y;
+        if (dx*dx + dy*dy <= radius*radius) {
+            agentIdx = i;
+            return true;
         }
     }
+    
+    return false;
+}
 
-    update();
+void Simulator::showMessage(const std::string& message, float duration) {
+    message_ = message;
+    messageTimeRemaining_ = duration;
+    messageClock_.restart();
+    std::cout << "Simulator message: " << message << std::endl;
+}
+
+bool Simulator::isValidPosition(int x, int y) const {
+    // Check if position is within bounds and not an obstacle
+    return x >= 0 && x < dimX_ && y >= 0 && y < dimY_ && 
+           obstacles_.find(Location(x, y)) == obstacles_.end();
 }
 
 State Simulator::findStateAtTime(const std::vector<PlanResult<State, Action, int>>& solution, int agentId, int timestep) const {
@@ -146,299 +170,159 @@ State Simulator::findStateAtTime(const std::vector<PlanResult<State, Action, int
         return State(-1, -1, -1);
     }
     
-    const auto& plan = solution[agentId];
-    
-    // If the plan is empty, return an invalid state
-    if (plan.states.empty()) {
-        return State(-1, -1, -1);
+    const auto& states = solution[agentId].states;
+    if (states.empty()) {
+        return agentStarts_[agentId];
     }
     
-    // If timestep is before the first state, return the first state
-    if (timestep <= plan.states.front().second) {
-        return plan.states.front().first;
-    }
-    
-    // If timestep is after the last state, return the last state
-    if (timestep >= plan.states.back().second) {
-        return plan.states.back().first;
-    }
-    
-    // Search for the exact state at the timestep
-    for (size_t i = 0; i < plan.states.size() - 1; ++i) {
-        const auto& [state1, t1] = plan.states[i];
-        const auto& [state2, t2] = plan.states[i + 1];
-        
-        if (t1 == timestep) {
-            // Exact match for timestep
-            return state1;
-        }
-        
-        if (t1 < timestep && t2 > timestep) {
-            // We're between two states, interpolate based on time
-            double ratio = static_cast<double>(timestep - t1) / (t2 - t1);
-            int x = state1.x + static_cast<int>(ratio * (state2.x - state1.x));
-            int y = state1.y + static_cast<int>(ratio * (state2.y - state1.y));
-            
-            return State(timestep, x, y);
+    // Find the state at or before the given timestep
+    for (size_t i = 0; i < states.size(); ++i) {
+        if (states[i].second > timestep) {
+            // Return previous state if this one is past the timestep
+            return i > 0 ? states[i-1].first : states[0].first;
         }
     }
     
-    // If we get here, check if the last state matches
-    if (plan.states.back().second == timestep) {
-        return plan.states.back().first;
+    // If we get here, return the last state
+    return states.back().first;
+}
+
+sf::Vector2f Simulator::worldToScreen(float x, float y) const {
+    return sf::Vector2f(x * cellSize_, y * cellSize_);
+}
+
+// Private drawing methods
+void Simulator::drawGrid() {
+    for (int x = 0; x <= dimX_; ++x) {
+        sf::Vertex line[] = {
+            sf::Vertex(sf::Vector2f(x * cellSize_, 0), sf::Color(200, 200, 200)),
+            sf::Vertex(sf::Vector2f(x * cellSize_, dimY_ * cellSize_), sf::Color(200, 200, 200))
+        };
+        window_.draw(line, 2, sf::Lines);
     }
     
-    // Fallback to the last state (this should not happen with proper data)
-    return plan.states.back().first;
-}
-
-QPointF Simulator::interpolatePosition(const State& start, const State& end, double alpha) const {
-    double x = start.x + alpha * (end.x - start.x);
-    double y = start.y + alpha * (end.y - start.y);
-    return QPointF(x * cellSize_ + cellSize_ / 2, y * cellSize_ + cellSize_ / 2);
-}
-
-void Simulator::drawFlag(QPainter& painter, const QRect& cell, const QColor& color) const {
-    int flagpoleWidth = cellSize_ / 10;
-    int flagHeight = cellSize_ / 2;
-    int flagWidth = cellSize_ / 2;
-    int centerX = cell.center().x();
-    int bottomY = cell.bottom() - cellSize_ / 4;
-
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(color);
-    painter.drawRect(centerX - flagpoleWidth / 2, bottomY - flagHeight, flagpoleWidth, flagHeight);
-
-    QPolygon flag;
-    flag << QPoint(centerX + flagpoleWidth / 2, bottomY - flagHeight)
-         << QPoint(centerX + flagpoleWidth / 2 + flagWidth, bottomY - flagHeight + flagHeight / 3)
-         << QPoint(centerX + flagpoleWidth / 2, bottomY - flagHeight + flagHeight / 2);
-
-    painter.setBrush(color);
-    painter.drawPolygon(flag);
-}
-
-// New helper methods for agent dragging
-int Simulator::findAgentAtPosition(const QPoint& pos) const {
-    if (!hasValidSolution_) return -1;
-    
-    for (size_t i = 0; i < solution_.size(); ++i) {
-        State state = findStateAtTime(solution_, i, currentTimestep_);
-        QPointF agentPos = interpolatePosition(state, 
-                                            findStateAtTime(solution_, i, currentTimestep_ + 1), 
-                                            interpolationAlpha_);
-        
-        QPointF agentCenter(agentPos.x(), agentPos.y());
-        double distance = QLineF(agentCenter, pos).length();
-        
-        // Check if click is within agent radius
-        if (distance < cellSize_ * 0.3) {
-            return static_cast<int>(i);
-        }
+    for (int y = 0; y <= dimY_; ++y) {
+        sf::Vertex line[] = {
+            sf::Vertex(sf::Vector2f(0, y * cellSize_), sf::Color(200, 200, 200)),
+            sf::Vertex(sf::Vector2f(dimX_ * cellSize_, y * cellSize_), sf::Color(200, 200, 200))
+        };
+        window_.draw(line, 2, sf::Lines);
     }
-    
-    return -1;  // No agent found at click position
 }
 
-State Simulator::gridPositionToState(const QPointF& pos) const {
-    int gridX = static_cast<int>(pos.x() / cellSize_);
-    int gridY = static_cast<int>(pos.y() / cellSize_);
+void Simulator::drawObstacles() {
+    sf::RectangleShape rect;
+    rect.setSize(sf::Vector2f(cellSize_, cellSize_));
+    rect.setFillColor(sf::Color(100, 100, 100)); // Dark gray
     
-    // Clamp to grid boundaries
-    gridX = std::max(0, std::min(gridX, dimX_ - 1));
-    gridY = std::max(0, std::min(gridY, dimY_ - 1));
-    
-    return State(currentTimestep_, gridX, gridY);
-}
-
-bool Simulator::isValidPosition(int x, int y) const {
-    // Check if position is within grid boundaries
-    if (x < 0 || x >= dimX_ || y < 0 || y >= dimY_) {
-        return false;
+    for (const auto& obstacle : obstacles_) {
+        rect.setPosition(obstacle.x * cellSize_, obstacle.y * cellSize_);
+        window_.draw(rect);
     }
-    
-    // Check if position is an obstacle
-    if (obstacles_.count(Location(x, y)) > 0) {
-        return false;
-    }
-    
-    return true;
 }
 
-State Simulator::getDraggedAgentState() const {
-    if (draggedAgentIdx_ < 0) {
-        return State(-1, -1, -1);  // Invalid state
-    }
-    return draggedAgentOrigState_;
-}
-
-// Mouse event handlers
-void Simulator::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton && hasValidSolution_) {
-        draggedAgentIdx_ = findAgentAtPosition(event->pos());
-        
-        if (draggedAgentIdx_ >= 0) {
-            // Store the original state before dragging
-            draggedAgentOrigState_ = findStateAtTime(solution_, draggedAgentIdx_, currentTimestep_);
-            
-            // Calculate offset from agent center to click point for smooth dragging
-            State agentState = draggedAgentOrigState_;
-            QPointF agentCenter = QPointF(agentState.x * cellSize_ + cellSize_ / 2, 
-                                        agentState.y * cellSize_ + cellSize_ / 2);
-            dragOffset_ = agentCenter - event->pos();
-            
-            // Pause animation while dragging
-            if (animationTimer_->isActive()) {
-                animationTimer_->stop();
-            }
-        }
-    }
+void Simulator::drawGoals() {
+    sf::CircleShape goalMarker;
+    goalMarker.setRadius(cellSize_ / 3.0f);
+    goalMarker.setOutlineThickness(2);
+    goalMarker.setOutlineColor(sf::Color::Black);
+    goalMarker.setPointCount(4); // Diamond shape
     
-    QWidget::mousePressEvent(event);
-}
-
-void Simulator::mouseMoveEvent(QMouseEvent* event) {
-    if (draggedAgentIdx_ >= 0) {
-        // Just update the UI when dragging, we'll calculate positions in paintEvent
-        update();
-    }
-    
-    QWidget::mouseMoveEvent(event);
-}
-
-void Simulator::mouseReleaseEvent(QMouseEvent* event) {
-    if (draggedAgentIdx_ >= 0) {
-        // Calculate final position
-        QPointF adjustedPos = event->pos() + dragOffset_;
-        
-        // Convert to grid coordinates and snap to the closest cell
-        State newState = gridPositionToState(adjustedPos);
-        
-        // Check if position is valid (not an obstacle and within grid)
-        if (isValidPosition(newState.x, newState.y)) {
-            // Emit signal with new agent position for controller to handle replanning
-            emit agentDragged(draggedAgentIdx_, newState);
-        } else {
-            // If invalid position, show a warning and resume animation
-            showReplanningWarning("Invalid position! Agent returned to original position.");
-            startAnimation();
-        }
-        
-        // Reset drag state
-        draggedAgentIdx_ = -1;
-    }
-    
-    QWidget::mouseReleaseEvent(event);
-}
-
-void Simulator::showReplanningWarning(const QString& message) {
-    warningMessage_ = message;
-    update();
-    
-    // Clear the warning after 3 seconds
-    warningTimer_->start(3000);
-}
-
-void Simulator::paintEvent(QPaintEvent*) {
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
-
-    for (int y = 0; y < dimY_; ++y) {
-        for (int x = 0; x < dimX_; ++x) {
-            QRect cell(x * cellSize_, y * cellSize_, cellSize_, cellSize_);
-            painter.setPen(Qt::gray);
-            painter.setBrush(obstacles_.count(Location(x, y)) ? Qt::black : Qt::white);
-            painter.drawRect(cell);
-        }
-    }
-
-    // Draw goals
     for (size_t i = 0; i < agentGoals_.size(); ++i) {
-        QRect cell(agentGoals_[i].x * cellSize_, agentGoals_[i].y * cellSize_, cellSize_, cellSize_);
-        drawFlag(painter, cell, agentColors_[i]);
-    }
-
-    if (hasValidSolution_) {
-        for (size_t i = 0; i < solution_.size(); ++i) {
-            // If this agent is being dragged, use the dragged position
-            if (draggedAgentIdx_ == static_cast<int>(i)) {
-                QPointF dragPos = QCursor::pos() - this->mapToGlobal(QPoint(0, 0)) + dragOffset_;
-                
-                // Convert to grid coordinates for snapping
-                State dragState = gridPositionToState(dragPos);
-                
-                // Only draw if valid position
-                if (isValidPosition(dragState.x, dragState.y)) {
-                    // Draw at the snapped grid position
-                    QPointF center(dragState.x * cellSize_ + cellSize_ / 2, 
-                                  dragState.y * cellSize_ + cellSize_ / 2);
-                    
-                    // Draw with slight transparency while dragging
-                    QColor dragColor = agentColors_[i];
-                    dragColor.setAlpha(180);
-                    
-                    painter.setBrush(dragColor);
-                    painter.setPen(QPen(Qt::black, 2, Qt::DashLine));
-                    painter.drawEllipse(center, cellSize_ * 0.3, cellSize_ * 0.3);
-                    
-                    painter.setPen(Qt::black);
-                    painter.setFont(QFont("Arial", cellSize_ / 3));
-                    painter.drawText(QRectF(center.x() - 10, center.y() - 10, 20, 20), 
-                                    Qt::AlignCenter, QString::number(i));
-                } else {
-                    // Draw with red outline at cursor position if invalid
-                    QPointF cursorPos = dragPos;
-                    
-                    QColor invalidColor = QColor(255, 80, 80, 180); // Semi-transparent red
-                    
-                    painter.setBrush(invalidColor);
-                    painter.setPen(QPen(Qt::red, 2, Qt::DashLine));
-                    painter.drawEllipse(cursorPos, cellSize_ * 0.3, cellSize_ * 0.3);
-                    
-                    painter.setPen(Qt::black);
-                    painter.setFont(QFont("Arial", cellSize_ / 3));
-                    painter.drawText(QRectF(cursorPos.x() - 10, cursorPos.y() - 10, 20, 20), 
-                                    Qt::AlignCenter, QString::number(i));
-                }
-            } else {
-                // Draw normally for non-dragged agents
-                State currentState = findStateAtTime(solution_, i, currentTimestep_);
-                State nextState = findStateAtTime(solution_, i, currentTimestep_ + 1);
-                QPointF pos = interpolatePosition(currentState, nextState, interpolationAlpha_);
-
-                painter.setBrush(agentColors_[i]);
-                painter.setPen(QPen(Qt::black, 2));
-                painter.drawEllipse(pos, cellSize_ * 0.3, cellSize_ * 0.3);
-
-                painter.setPen(Qt::black);
-                painter.setFont(QFont("Arial", cellSize_ / 3));
-                painter.drawText(QRectF(pos.x() - 10, pos.y() - 10, 20, 20), Qt::AlignCenter, QString::number(i));
-            }
-        }
-    }
-
-    painter.setPen(Qt::black);
-    painter.setFont(QFont("Arial", 12));
-    painter.drawText(10, 20, QString("Time: %1").arg(currentTimestep_));
-    
-    // If an agent is being dragged, show informative text
-    if (draggedAgentIdx_ >= 0) {
-        painter.setPen(Qt::red);
-        painter.setFont(QFont("Arial", 12, QFont::Bold));
-        painter.drawText(10, 40, QString("Dragging Agent %1 - Will Replan").arg(draggedAgentIdx_));
-    }
-    
-    // Draw warning message if it exists
-    if (!warningMessage_.isEmpty()) {
-        QRectF messageRect = QRectF(10, height() - 40, width() - 20, 30);
+        const auto& goal = agentGoals_[i];
         
-        // Draw a semi-transparent background for the message
-        painter.setBrush(QColor(255, 200, 200, 220));
-        painter.setPen(Qt::NoPen);
-        painter.drawRoundedRect(messageRect, 5, 5);
+        // Use agent's color for the goal
+        sf::Color goalColor = i < agentColors_.size() ? agentColors_[i] : sf::Color::Yellow;
+        goalColor.a = 128; // Semi-transparent
         
-        painter.setPen(Qt::red);
-        painter.setFont(QFont("Arial", 12, QFont::Bold));
-        painter.drawText(messageRect, Qt::AlignCenter, warningMessage_);
+        goalMarker.setFillColor(goalColor);
+        goalMarker.setPosition(
+            goal.x * cellSize_ + cellSize_/2.0f - goalMarker.getRadius(),
+            goal.y * cellSize_ + cellSize_/2.0f - goalMarker.getRadius()
+        );
+        
+        window_.draw(goalMarker);
     }
 }
+
+void Simulator::drawAgents(const std::vector<PlanResult<State, Action, int>>& solution, int timestep, double alpha) {
+    sf::CircleShape agentShape;
+    agentShape.setRadius(cellSize_ / 3.0f);
+    
+    for (size_t i = 0; i < solution.size(); ++i) {
+        // Find agent states at current and next timestep for interpolation
+        State currentState = findStateAtTime(solution, i, timestep);
+        State nextState = findStateAtTime(solution, i, timestep + 1);
+        
+        // Interpolate between current and next position
+        sf::Vector2f position;
+        if (currentState.x == nextState.x && currentState.y == nextState.y) {
+            position = worldToScreen(currentState.x, currentState.y);
+        } else {
+            position = sf::Vector2f(
+                (currentState.x * (1.0f - alpha) + nextState.x * alpha) * cellSize_,
+                (currentState.y * (1.0f - alpha) + nextState.y * alpha) * cellSize_
+            );
+        }
+        
+        // Set color and position
+        sf::Color agentColor = i < agentColors_.size() ? agentColors_[i] : sf::Color::Red;
+        agentShape.setFillColor(agentColor);
+        agentShape.setPosition(
+            position.x + cellSize_/2.0f - agentShape.getRadius(),
+            position.y + cellSize_/2.0f - agentShape.getRadius()
+        );
+        
+        // Draw agent number
+        window_.draw(agentShape);
+        
+        if (font_.getInfo().family != "") {
+            sf::Text text;
+            text.setFont(font_);
+            text.setString(std::to_string(i));
+            text.setCharacterSize(cellSize_ / 3);
+            text.setFillColor(sf::Color::White);
+            
+            // Center text on agent
+            sf::FloatRect textBounds = text.getLocalBounds();
+            text.setPosition(
+                position.x + cellSize_/2.0f - textBounds.width/2.0f,
+                position.y + cellSize_/2.0f - textBounds.height
+            );
+            
+            window_.draw(text);
+        }
+    }
+}
+
+void Simulator::drawUI(int timestep) {
+    if (font_.getInfo().family == "") return;
+    
+    sf::Text text;
+    text.setFont(font_);
+    text.setCharacterSize(20);
+    text.setFillColor(sf::Color::Black);
+    text.setPosition(10, 10);
+    text.setString("Timestep: " + std::to_string(timestep));
+    
+    window_.draw(text);
+}
+
+void Simulator::drawMessage() {
+    if (messageTimeRemaining_ <= 0 || font_.getInfo().family == "") return;
+    
+    sf::Text text;
+    text.setFont(font_);
+    text.setString(message_);
+    text.setCharacterSize(24);
+    text.setFillColor(sf::Color::Red);
+    
+    // Center text at bottom of screen
+    sf::FloatRect textBounds = text.getLocalBounds();
+    text.setPosition(
+        window_.getSize().x / 2.0f - textBounds.width / 2.0f,
+        window_.getSize().y - 50
+    );
+    
+    window_.draw(text);
+} 
