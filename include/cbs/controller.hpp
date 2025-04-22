@@ -25,6 +25,7 @@ public:
     bool initializePlanner();
     bool initializeVizWindow();
     bool computeInitialPlan();
+    bool setupSimulator();
     
     // Main loop
     void run();

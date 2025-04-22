@@ -19,16 +19,19 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Run First Planner Solution
+    // Initialize Planner
     if (!ctrl.initializePlanner()) {
         std::cerr << "Failed to initialize Planner" << std::endl;
         return 2;
     }
 
+    // Run First Planner Solution
     if(!ctrl.computeInitialPlan()){
         std::cerr << "Failed to compute Intial Plan" << std::endl;
         return 2;
     }
+
+    ctrl.setupSimulator();
     
     // Initialize viz Window
     if(!ctrl.initializeVizWindow()) {
@@ -37,6 +40,5 @@ int main(int argc, char *argv[]) {
  
     // Run Controller
     std::cout << "Running simulation..." << std::endl;
-    std::cout << "The simulation will display in a separate window." << std::endl;
     ctrl.run();
 }

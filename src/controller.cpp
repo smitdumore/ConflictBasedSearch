@@ -64,18 +64,6 @@ bool Controller::loadMapFromYAML(const std::string& filename) {
             goals_.emplace_back(Location(gx, gy));
         }
 
-        // Create 2D map for simulator
-        std::vector<std::vector<bool>> mapGrid(dimY_, std::vector<bool>(dimX_, false));
-        for (const auto& obs : obstacles_) {
-            if (obs.x >= 0 && obs.x < dimX_ && obs.y >= 0 && obs.y < dimY_) {
-                mapGrid[obs.y][obs.x] = true;
-            }
-        }
-
-        // Set map and agents in simulator
-        simulator_->setMap(mapGrid);
-        simulator_->setAgents(starts_, goals_);
-
         std::cout << "Map loaded successfully from: " << filename << std::endl;
         return true;
 
@@ -83,6 +71,20 @@ bool Controller::loadMapFromYAML(const std::string& filename) {
         std::cerr << "Failed to load YAML: " << e.what() << std::endl;
         return false;
     }
+}
+
+bool Controller::setupSimulator() {
+    // Create 2D map for simulator
+    std::vector<std::vector<bool>> mapGrid(dimY_, std::vector<bool>(dimX_, false));
+    for (const auto& obs : obstacles_) {
+        if (obs.x >= 0 && obs.x < dimX_ && obs.y >= 0 && obs.y < dimY_) {
+            mapGrid[obs.y][obs.x] = true;
+        }
+    }
+
+    // Set map and agents in simulator
+    simulator_->setMap(mapGrid);
+    simulator_->setAgents(starts_, goals_);
 }
 
 bool Controller::initializeVizWindow() {
@@ -127,7 +129,7 @@ void Controller::run() {
             
             // Update simulation
             if (!paused_) {
-                update(deltaTime);
+                update(deltaTime); // advances currentTimestep 
             }
             
             // Render current state
@@ -241,7 +243,6 @@ bool Controller::computeInitialPlan() {
     }
     
     std::cout << "Starting initial planning for " << starts_.size() << " agents" << std::endl;
-    std::cout << "CALEED CBS SAERCH" << std::endl;
     
     // Clear any existing solution
     solution_.clear();
@@ -271,6 +272,7 @@ bool Controller::computeInitialPlan() {
     std::cout << "Makespan (max timesteps): " << maxTimestep_ << std::endl;
     
     // Reset simulation to start state
+    // Force our assumption
     currentTimestep_ = 0;
     interpolationAlpha_ = 0.0f;
     timeAccumulator_ = 0.0f;
