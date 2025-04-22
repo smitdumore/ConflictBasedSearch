@@ -1,10 +1,10 @@
-#include "cbs/ui.hpp"
+#include "cbs/controller.hpp"
 #include <iostream>
 #include <fstream>
 #include <chrono>
 #include <thread>
 
-UI::UI()
+Controller::Controller()
     : running_(false), paused_(false), timeMultiplier_(1.0f), secondsPerTimestep_(0.5f),
       timeAccumulator_(0.0f), currentTimestep_(0), interpolationAlpha_(0.0f), maxTimestep_(0),
       dimX_(0), dimY_(0), draggedAgentIdx_(-1)
@@ -13,11 +13,11 @@ UI::UI()
     simulator_ = std::make_unique<Simulator>();
 }
 
-UI::~UI() {
+Controller::~Controller() {
     stop();
 }
 
-bool UI::loadMapFromYAML(const std::string& filename) {
+bool Controller::loadMapFromYAML(const std::string& filename) {
     try {
         YAML::Node config = YAML::LoadFile(filename);
 
@@ -85,7 +85,18 @@ bool UI::loadMapFromYAML(const std::string& filename) {
     }
 }
 
-bool UI::initialize() {
+bool Controller::initializeVizWindow() {
+    // Create a window for visualization
+    int windowWidth = dimX_ * 50; // 50 pixels per cell
+    int windowHeight = dimY_ * 50;
+    bool windowCreated = simulator_->createWindow(windowWidth, windowHeight, "CBS Simulator");
+    
+    if (!windowCreated) {
+        return false;
+    }
+}
+
+bool Controller::initializePlanner() {
     // Initialize the environment and planner
     bool disappearAtGoal = false;
     int spaceSlack = 2;
@@ -94,21 +105,10 @@ bool UI::initialize() {
     environment_ = std::make_unique<Environment>(dimX_, dimY_, obstacles_, goals_, disappearAtGoal, spaceSlack);
     planner_ = std::make_unique<CBS<State, Action, int, Conflict, Constraints, Environment>>(*environment_, maxNodes);
 
-    // Create a window for visualization
-    int windowWidth = dimX_ * 50; // 50 pixels per cell
-    int windowHeight = dimY_ * 50;
-    bool windowCreated = simulator_->createWindow(windowWidth, windowHeight, "CBS Simulator");
-    
-    if (!windowCreated) {
-        std::cerr << "Failed to create window" << std::endl;
-        return false;
-    }
-
-    // Compute initial plan
-    return computeInitialPlan();
+    return true;
 }
 
-void UI::run() {
+void Controller::run() {
     if (!running_) {
         running_ = true;
         paused_ = false;
@@ -139,7 +139,7 @@ void UI::run() {
     }
 }
 
-bool UI::update(float deltaTime) {
+bool Controller::update(float deltaTime) {
     static int lastTimestep = -1;
     static int updateCounter = 0;
     
@@ -180,32 +180,32 @@ bool UI::update(float deltaTime) {
     return true;
 }
 
-void UI::render() {
+void Controller::render() {
     // Render the current state of the simulation
     simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
     simulator_->display();
 }
 
-void UI::pause() {
+void Controller::pause() {
     paused_ = true;
 }
 
-void UI::resume() {
+void Controller::resume() {
     paused_ = false;
 }
 
-void UI::reset() {
+void Controller::reset() {
     currentTimestep_ = 0;
     timeAccumulator_ = 0.0f;
     interpolationAlpha_ = 0.0f;
     paused_ = false;
 }
 
-void UI::stop() {
+void Controller::stop() {
     running_ = false;
 }
 
-bool UI::dragAgent(int agentIdx, int x, int y) {
+bool Controller::dragAgent(int agentIdx, int x, int y) {
     // Validate agent index
     if (agentIdx < 0 || agentIdx >= static_cast<int>(starts_.size())) {
         return false;
@@ -218,7 +218,7 @@ bool UI::dragAgent(int agentIdx, int x, int y) {
     // Print information about the drag
     std::cout << "Drag recorded: Agent " << agentIdx << " to position (" << x << "," << y << ")" << std::endl;
     
-    // Show a message in the UI instead of attempting to replan
+    // Show a message in the Controller instead of attempting to replan
     if (simulator_) {
         simulator_->showMessage("Drag detected: Agent " + std::to_string(agentIdx) + 
                                " → (" + std::to_string(x) + "," + std::to_string(y) + ")", 3.0f);
@@ -229,11 +229,11 @@ bool UI::dragAgent(int agentIdx, int x, int y) {
 }
 
 // For backward compatibility
-bool UI::handleAgentDrag(int agentIdx, int x, int y) {
+bool Controller::handleAgentDrag(int agentIdx, int x, int y) {
     return dragAgent(agentIdx, x, y);
 }
 
-bool UI::computeInitialPlan() {
+bool Controller::computeInitialPlan() {
     // Check prerequisites
     if (!environment_ || !planner_) {
         std::cerr << "Environment or planner not initialized" << std::endl;
@@ -278,7 +278,7 @@ bool UI::computeInitialPlan() {
     return true;
 }
 
-bool UI::replanFromCurrentStates(int draggedAgentIdx, State newDraggedState) {
+bool Controller::replanFromCurrentStates(int draggedAgentIdx, State newDraggedState) {
     // This method has been simplified to just display a message
     std::cout << "Replanning is disabled in this version." << std::endl;
     
@@ -289,7 +289,7 @@ bool UI::replanFromCurrentStates(int draggedAgentIdx, State newDraggedState) {
     return false;
 }
 
-State UI::getCurrentAgentPosition(size_t agentIdx) const {
+State Controller::getCurrentAgentPosition(size_t agentIdx) const {
     if (agentIdx >= solution_.size()) {
         return State(-1, -1, -1);
     }
@@ -313,7 +313,7 @@ State UI::getCurrentAgentPosition(size_t agentIdx) const {
     return currentPosition;
 }
 
-bool UI::validateAgentPositions(const std::vector<State>& positions) const {
+bool Controller::validateAgentPositions(const std::vector<State>& positions) const {
     // Check for overlapping agents
     for (size_t i = 0; i < positions.size(); i++) {
         for (size_t j = i + 1; j < positions.size(); j++) {
@@ -337,7 +337,7 @@ bool UI::validateAgentPositions(const std::vector<State>& positions) const {
     return true;
 }
 
-void UI::resetSimulation() {
+void Controller::resetSimulation() {
     currentTimestep_ = 0;
     interpolationAlpha_ = 0.0f;
     timeAccumulator_ = 0.0f;
@@ -346,7 +346,7 @@ void UI::resetSimulation() {
     std::cout << "Simulation reset" << std::endl;
 }
 
-void UI::processEvents() {
+void Controller::processEvents() {
     if (simulator_) {
         simulator_->processEvents();
         

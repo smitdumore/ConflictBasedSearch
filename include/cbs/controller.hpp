@@ -12,17 +12,19 @@
 #include <yaml-cpp/yaml.h>
 
 /**
- * The UI class manages the core simulation loop and state.
+ * The Controller class manages the core simulation loop and state.
  * It coordinates between the planner (CBS) and visualization (Simulator).
  */
-class UI {
+class Controller {
 public:
-    UI();
-    ~UI();
+    Controller();
+    ~Controller();
 
     // Setup
     bool loadMapFromYAML(const std::string& filename);
-    bool initialize();
+    bool initializePlanner();
+    bool initializeVizWindow();
+    bool computeInitialPlan();
     
     // Main loop
     void run();
@@ -80,7 +82,6 @@ private:
     int draggedAgentIdx_;
     
     // Methods
-    bool computeInitialPlan();
     bool replanFromCurrentStates(int draggedAgentIdx = -1, State newDraggedState = State(-1, -1, -1));
     State getCurrentAgentPosition(size_t agentIdx) const;
     bool validateAgentPositions(const std::vector<State>& positions) const;
