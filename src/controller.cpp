@@ -3,14 +3,18 @@
 #include <fstream>
 #include <chrono>
 #include <thread>
+#include <yaml-cpp/yaml.h>
 
 Controller::Controller()
-    : running_(false), paused_(false), timeMultiplier_(1.0f), secondsPerTimestep_(0.5f),
+    : running_(false), paused_(false), initialized_(false), timeMultiplier_(1.0f), secondsPerTimestep_(0.5f),
       timeAccumulator_(0.0f), currentTimestep_(0), interpolationAlpha_(0.0f), maxTimestep_(0),
-      dimX_(0), dimY_(0), draggedAgentIdx_(-1)
+      dimX_(0), dimY_(0), draggedAgentIdx_(-1), isDragging_(false)
 {
     // Create simulator
     simulator_ = std::make_unique<Simulator>();
+    
+    // Initialize last mouse position
+    lastMousePosition_ = sf::Vector2i(0, 0);
 }
 
 Controller::~Controller() {
@@ -60,10 +64,18 @@ bool Controller::loadMapFromYAML(const std::string& filename) {
                 continue;
             }
 
+            // State constructor takes (time, x, y)
             starts_.emplace_back(State(0, sx, sy));
             goals_.emplace_back(Location(gx, gy));
         }
 
+        // Initialize simulator and planner
+        if (!setupSimulator() || !initializeVizWindow() || !initializePlanner() || !computeInitialPlan()) {
+            return false;
+        }
+        
+        // Mark as fully initialized
+        initialized_ = true;
         std::cout << "Map loaded successfully from: " << filename << std::endl;
         return true;
 
@@ -74,28 +86,31 @@ bool Controller::loadMapFromYAML(const std::string& filename) {
 }
 
 bool Controller::setupSimulator() {
-    // Create 2D map for simulator
-    std::vector<std::vector<bool>> mapGrid(dimY_, std::vector<bool>(dimX_, false));
-    for (const auto& obs : obstacles_) {
-        if (obs.x >= 0 && obs.x < dimX_ && obs.y >= 0 && obs.y < dimY_) {
-            mapGrid[obs.y][obs.x] = true;
+    if (simulator_) {
+        simulator_->setMap(std::vector<std::vector<bool>>(dimY_, std::vector<bool>(dimX_, false)));
+        
+        for (const auto& obstacle : obstacles_) {
+            std::vector<std::vector<bool>> tempMap(dimY_, std::vector<bool>(dimX_, false));
+            tempMap[obstacle.y][obstacle.x] = true;
+            simulator_->setMap(tempMap);
         }
+        
+        simulator_->setAgents(starts_, goals_);
+        
+        return true;
     }
-
-    // Set map and agents in simulator
-    simulator_->setMap(mapGrid);
-    simulator_->setAgents(starts_, goals_);
+    return false;
 }
 
 bool Controller::initializeVizWindow() {
-    // Create a window for visualization
-    int windowWidth = dimX_ * 50; // 50 pixels per cell
-    int windowHeight = dimY_ * 50;
-    bool windowCreated = simulator_->createWindow(windowWidth, windowHeight, "CBS Simulator");
-    
-    if (!windowCreated) {
-        return false;
+    if (simulator_) {
+        int width = std::max(500, dimX_ * 50);
+        int height = std::max(300, dimY_ * 50);
+        bool success = simulator_->createWindow(width, height, "CBS Simulator");
+        initialized_ = success;
+        return success;
     }
+    return false;
 }
 
 bool Controller::initializePlanner() {
@@ -111,33 +126,32 @@ bool Controller::initializePlanner() {
 }
 
 void Controller::run() {
-    if (!running_) {
-        running_ = true;
-        paused_ = false;
+    if (!initialized_) {
+        std::cerr << "Controller not initialized, cannot run" << std::endl;
+        return;
+    }
+
+    running_ = true;
+    sf::Clock clock;
+    
+    while (running_ && simulator_ && simulator_->isWindowOpen()) {
+        // Process events (includes drag handling)
+        processEvents();
         
-        // Main simulation loop
-        auto lastTime = std::chrono::high_resolution_clock::now();
+        // Get elapsed time
+        float deltaTime = clock.restart().asSeconds();
         
-        while (running_ && simulator_->isWindowOpen()) {
-            // Process window events
-            processEvents();
-            
-            // Calculate delta time
-            auto currentTime = std::chrono::high_resolution_clock::now();
-            float deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
-            lastTime = currentTime;
-            
-            // Update simulation
-            if (!paused_) {
-                update(deltaTime); // advances currentTimestep 
-            }
-            
-            // Render current state
-            render();
-            
-            // Keep a consistent frame rate
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Update simulation logic (taking into account pausing)
+        update(deltaTime);
+        
+        // Render the current state
+        if (simulator_) {
+            simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+            simulator_->display();
         }
+        
+        // Short sleep to prevent using 100% CPU
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
 
@@ -151,9 +165,14 @@ bool Controller::update(float deltaTime) {
         std::cout << "Solution has " << solution_.size() << " agents" << std::endl;
     }
     
+    // If we're dragging, don't update the timestep
+    if (isDragging_) {
+        return true;
+    }
+    
     // For the stub simulator, manually advance time
     updateCounter++;
-    if (updateCounter % 50 == 0) {  // Every ~0.5 seconds (assuming 10ms sleep)
+    if (!paused_ && updateCounter % 50 == 0) {  // Every ~0.5 seconds (assuming 10ms sleep)
         // Don't advance timestep if maxTimestep is 0 (invalid plan)
         if (maxTimestep_ <= 0) {
             std::cout << "Warning: No valid plan to simulate (maxTimestep=" << maxTimestep_ << ")" << std::endl;
@@ -217,16 +236,42 @@ bool Controller::dragAgent(int agentIdx, int x, int y) {
     x = std::max(0, std::min(x, dimX_ - 1));
     y = std::max(0, std::min(y, dimY_ - 1));
     
-    // Print information about the drag
-    std::cout << "Drag recorded: Agent " << agentIdx << " to position (" << x << "," << y << ")" << std::endl;
-    
-    // Show a message in the Controller instead of attempting to replan
-    if (simulator_) {
-        simulator_->showMessage("Drag detected: Agent " + std::to_string(agentIdx) + 
-                               " → (" + std::to_string(x) + "," + std::to_string(y) + ")", 3.0f);
+    // Check if position is valid (not an obstacle)
+    if (!simulator_->isValidPosition(x, y)) {
+        std::cout << "Cannot move agent to invalid position: (" << x << "," << y << ")" << std::endl;
+        simulator_->showMessage("Invalid position (" + std::to_string(x) + "," + std::to_string(y) + ")", 2.0f);
+        return false;
     }
     
-    // Return success without actually replanning
+    // Create updated state - CORRECT ORDER IS (time, x, y)
+    State updatedState(0, x, y);
+    
+    // Update the start position
+    starts_[agentIdx] = updatedState;
+    
+    // Update the solution
+    if (agentIdx < static_cast<int>(solution_.size()) && !solution_[agentIdx].states.empty()) {
+        // Create a new state list with the updated position
+        std::vector<std::pair<State, int>> newStates;
+        newStates.emplace_back(updatedState, currentTimestep_);
+        solution_[agentIdx].states = newStates;
+    }
+    
+    // Print information about the drag
+    std::cout << "Agent " << agentIdx << " moved to position (" << x << "," << y << ")" << std::endl;
+    
+    // Show a message in the simulator
+    if (simulator_) {
+        simulator_->showMessage("Agent " + std::to_string(agentIdx) + 
+                               " moved to (" + std::to_string(x) + "," + std::to_string(y) + ")", 3.0f);
+    }
+    
+    // Force a render update
+    if (simulator_) {
+        simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+        simulator_->display();
+    }
+    
     return true;
 }
 
@@ -297,16 +342,16 @@ State Controller::getCurrentAgentPosition(size_t agentIdx) const {
     }
     
     State currentPosition(-1, -1, -1);
-    
-    // Find the state nearest to the current timestep
+            
+            // Find the state nearest to the current timestep
     for (const auto& [state, time] : solution_[agentIdx].states) {
-        if (time <= currentTimestep_) {
+                if (time <= currentTimestep_) {
             currentPosition = state;
-        } else {
-            break;  // We've passed the current timestep
-        }
-    }
-    
+                } else {
+                    break;  // We've passed the current timestep
+                }
+            }
+            
     // If no state found, use the start position
     if (currentPosition.x == -1 && currentPosition.y == -1) {
         return agentIdx < starts_.size() ? starts_[agentIdx] : State(-1, -1, -1);
@@ -352,26 +397,85 @@ void Controller::processEvents() {
     if (simulator_) {
         simulator_->processEvents();
         
-        // Check for mouse clicks
+        // Get current mouse position for drag handling
+        sf::Vector2i mousePos = simulator_->getMousePosition();
+        
+        // Check if mouse position changed
+        bool mouseMoved = (mousePos.x != lastMousePosition_.x || mousePos.y != lastMousePosition_.y);
+        lastMousePosition_ = mousePos;
+        
+        // Mouse pressed - check for agent selection
         if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
-            sf::Vector2i mousePos = simulator_->getMousePosition();
-            int agentIdx = -1;
-            
-            if (simulator_->checkAgentClick(mousePos.x, mousePos.y, agentIdx, solution_, currentTimestep_)) {
-                // Start dragging the agent
-                draggedAgentIdx_ = agentIdx;
-                std::cout << "Started dragging agent " << agentIdx << std::endl;
+            if (draggedAgentIdx_ < 0) {
+                // Not dragging yet - check for agent click
+                int agentIdx = -1;
+                if (simulator_->checkAgentClick(mousePos.x, mousePos.y, agentIdx, solution_, currentTimestep_)) {
+                    // Start dragging the agent
+                    draggedAgentIdx_ = agentIdx;
+                    isDragging_ = true;
+                    // Pause the simulation during drag
+                    if (!paused_) {
+                        paused_ = true;
+                    }
+                    std::cout << "Started dragging agent " << agentIdx << std::endl;
+                }
             }
-        } else if (draggedAgentIdx_ >= 0) {
-            // If mouse released after dragging, finalize the drag
-            sf::Vector2i mousePos = simulator_->getMousePosition();
+            else if (isDragging_ && mouseMoved) {
+                // Already dragging and mouse moved - visualize agent at cursor position
+                simulator_->drawDraggedAgent(draggedAgentIdx_, mousePos.x, mousePos.y);
+            }
+        } 
+        else if (draggedAgentIdx_ >= 0) {
+            // Mouse released after dragging - place agent at the new position
             sf::Vector2i worldPos = simulator_->screenToWorld(mousePos.x, mousePos.y);
             
-            // Attempt to drag the agent to the new position
-            dragAgent(draggedAgentIdx_, worldPos.x, worldPos.y);
+            // Check if position is valid
+            if (simulator_->isValidPosition(worldPos.x, worldPos.y)) {
+                // Valid position - finalize the drag by placing the agent
+                // CORRECT ORDER IS (time, x, y)
+                State updatedState(0, worldPos.x, worldPos.y);
+                
+                // Update the start position for the agent
+                if (draggedAgentIdx_ < static_cast<int>(starts_.size())) {
+                    starts_[draggedAgentIdx_] = updatedState;
+                    
+                    // Also update the solution to reflect the new position
+                    if (draggedAgentIdx_ < static_cast<int>(solution_.size()) && !solution_[draggedAgentIdx_].states.empty()) {
+                        // Create a new state list with the updated position at the current time
+                        std::vector<std::pair<State, int>> newStates;
+                        
+                        // Add the current position at the current time
+                        newStates.emplace_back(updatedState, currentTimestep_);
+                        
+                        // Replace the solution for this agent
+                        solution_[draggedAgentIdx_].states = newStates;
+                    }
+                    
+                    std::cout << "Agent " << draggedAgentIdx_ << " moved to (" 
+                              << worldPos.x << "," << worldPos.y << ")" << std::endl;
+                              
+                    // Show a message in the simulator
+                    simulator_->showMessage("Agent " + std::to_string(draggedAgentIdx_) + 
+                                          " moved to (" + std::to_string(worldPos.x) + 
+                                          "," + std::to_string(worldPos.y) + ")", 3.0f);
+                    
+                    // Force a re-render to show the updated position
+                    simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+                    simulator_->display();
+                    
+                    // Exit the application after moving an agent
+                    std::cout << "Agent moved. Exiting application." << std::endl;
+                    stop();
+                }
+            } else {
+                // Invalid position - show error message
+                simulator_->showMessage("Invalid position for agent " + 
+                                       std::to_string(draggedAgentIdx_), 3.0f);
+            }
             
-            // Reset dragged agent
+            // Reset drag state
             draggedAgentIdx_ = -1;
+            isDragging_ = false;
         }
     }
 } 

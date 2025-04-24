@@ -10,6 +10,7 @@
 #include "cbs.hpp"
 #include "simulator.hpp"
 #include <yaml-cpp/yaml.h>
+#include <SFML/Graphics.hpp>
 
 /**
  * The Controller class manages the core simulation loop and state.
@@ -55,6 +56,7 @@ private:
     // Simulation state
     bool running_;
     bool paused_;
+    bool initialized_;
     float timeMultiplier_;
     float secondsPerTimestep_;
     float timeAccumulator_;
@@ -81,6 +83,10 @@ private:
     
     // Agent handling
     int draggedAgentIdx_;
+    
+    // Current drag state
+    sf::Vector2i lastMousePosition_;
+    bool isDragging_;
     
     // Methods
     bool replanFromCurrentStates(int draggedAgentIdx = -1, State newDraggedState = State(-1, -1, -1));

@@ -49,6 +49,9 @@ public:
     bool isValidPosition(int x, int y) const;
     sf::Vector2f worldToScreen(float x, float y) const;
     sf::Vector2i screenToWorld(int x, int y) const;
+    
+    // Add new method for drawing a dragged agent
+    void drawDraggedAgent(int agentIdx, int x, int y);
 
 private:
     // SFML window and rendering

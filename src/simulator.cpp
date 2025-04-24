@@ -24,7 +24,7 @@ void Simulator::setMap(const std::vector<std::vector<bool>>& map) {
         std::cerr << "Error: Empty map provided to simulator" << std::endl;
         return;
     }
-    
+
     dimY_ = map.size();
     dimX_ = map[0].size();
     obstacles_.clear();
@@ -325,4 +325,88 @@ void Simulator::drawMessage() {
     );
     
     window_.draw(text);
+}
+
+void Simulator::drawDraggedAgent(int agentIdx, int x, int y) {
+    if (!window_.isOpen() || agentIdx < 0 || agentIdx >= static_cast<int>(agentColors_.size())) {
+        return;
+    }
+    
+    // Convert mouse position to grid coordinates
+    sf::Vector2i gridPos = screenToWorld(x, y);
+    
+    // Create ghost agent shape
+    sf::CircleShape ghostAgent;
+    ghostAgent.setRadius(cellSize_ / 3.0f);
+    
+    // Use agent's color but semi-transparent
+    sf::Color agentColor = agentColors_[agentIdx];
+    agentColor.a = 128; // Semi-transparent
+    ghostAgent.setFillColor(agentColor);
+    
+    // Draw border
+    ghostAgent.setOutlineThickness(2.0f);
+    ghostAgent.setOutlineColor(sf::Color(255, 255, 255, 200)); // White outline
+    
+    // Position at mouse cursor
+    sf::Vector2f worldPos = worldToScreen(gridPos.x, gridPos.y);
+    ghostAgent.setPosition(
+        worldPos.x + cellSize_/2.0f - ghostAgent.getRadius(),
+        worldPos.y + cellSize_/2.0f - ghostAgent.getRadius()
+    );
+    
+    // Draw the ghost agent
+    window_.draw(ghostAgent);
+    
+    // Display agent number
+    if (font_.getInfo().family != "") {
+        sf::Text text;
+        text.setFont(font_);
+        text.setString(std::to_string(agentIdx));
+        text.setCharacterSize(cellSize_ / 3);
+        text.setFillColor(sf::Color::White);
+        
+        // Center text on agent
+        sf::FloatRect textBounds = text.getLocalBounds();
+        text.setPosition(
+            worldPos.x + cellSize_/2.0f - textBounds.width/2.0f,
+            worldPos.y + cellSize_/2.0f - textBounds.height
+        );
+        
+        window_.draw(text);
+    }
+    
+    // Display grid coordinates
+    if (font_.getInfo().family != "") {
+        sf::Text posText;
+        posText.setFont(font_);
+        posText.setString("(" + std::to_string(gridPos.x) + "," + std::to_string(gridPos.y) + ")");
+        posText.setCharacterSize(16);
+        posText.setFillColor(sf::Color::Black);
+        
+        // Position text above agent
+        sf::FloatRect textBounds = posText.getLocalBounds();
+        posText.setPosition(
+            worldPos.x + cellSize_/2.0f - textBounds.width/2.0f,
+            worldPos.y - textBounds.height - 5
+        );
+        
+        window_.draw(posText);
+    }
+    
+    // Display feedback if position is invalid
+    if (!isValidPosition(gridPos.x, gridPos.y)) {
+        sf::CircleShape invalidMarker;
+        invalidMarker.setRadius(cellSize_ / 2.0f);
+        invalidMarker.setFillColor(sf::Color(255, 0, 0, 64)); // Red with low opacity
+        invalidMarker.setPosition(
+            worldPos.x + cellSize_/2.0f - invalidMarker.getRadius(),
+            worldPos.y + cellSize_/2.0f - invalidMarker.getRadius()
+        );
+        
+        window_.draw(invalidMarker);
+    }
+    
+    // We need to display immediately to avoid flicker
+    display();
 } 

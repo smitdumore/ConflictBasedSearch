@@ -4,7 +4,6 @@ project(cbs)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-cmake_policy(SET CMP0167 NEW)
 
 # Compile warnings
 add_compile_options(-Wall -Wextra)
