@@ -249,13 +249,8 @@ bool Controller::dragAgent(int agentIdx, int x, int y) {
     // Update the start position
     starts_[agentIdx] = updatedState;
     
-    // Update the solution
-    if (agentIdx < static_cast<int>(solution_.size()) && !solution_[agentIdx].states.empty()) {
-        // Create a new state list with the updated position
-        std::vector<std::pair<State, int>> newStates;
-        newStates.emplace_back(updatedState, currentTimestep_);
-        solution_[agentIdx].states = newStates;
-    }
+    // Store the original solution to keep the path visualization intact
+    // We don't modify solution_ at all, so the original path stays unchanged
     
     // Print information about the drag
     std::cout << "Agent " << agentIdx << " moved to position (" << x << "," << y << ")" << std::endl;
@@ -439,17 +434,8 @@ void Controller::processEvents() {
                 if (draggedAgentIdx_ < static_cast<int>(starts_.size())) {
                     starts_[draggedAgentIdx_] = updatedState;
                     
-                    // Also update the solution to reflect the new position
-                    if (draggedAgentIdx_ < static_cast<int>(solution_.size()) && !solution_[draggedAgentIdx_].states.empty()) {
-                        // Create a new state list with the updated position at the current time
-                        std::vector<std::pair<State, int>> newStates;
-                        
-                        // Add the current position at the current time
-                        newStates.emplace_back(updatedState, currentTimestep_);
-                        
-                        // Replace the solution for this agent
-                        solution_[draggedAgentIdx_].states = newStates;
-                    }
+                    // Keep the original solution to preserve the path visualization
+                    // No need to modify solution_ at all
                     
                     std::cout << "Agent " << draggedAgentIdx_ << " moved to (" 
                               << worldPos.x << "," << worldPos.y << ")" << std::endl;

@@ -43,18 +43,23 @@ void Simulator::setMap(const std::vector<std::vector<bool>>& map) {
 }
 
 void Simulator::setAgents(const std::vector<State>& starts, const std::vector<Location>& goals) {
-    agentStarts_ = starts;
+    // Only set if we haven't set agents before, otherwise keep the existing positions
+    // for any agents that might have been moved
+    if (agentStarts_.empty()) {
+        agentStarts_ = starts;
+    }
     agentGoals_ = goals;
     
-    // Generate random colors for agents
-    agentColors_.clear();
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> distrib(50, 200);
-    
-    for (size_t i = 0; i < starts.size(); ++i) {
-        sf::Color color(distrib(gen), distrib(gen), distrib(gen));
-        agentColors_.push_back(color);
+    // Generate random colors for agents if we don't have them already
+    if (agentColors_.empty()) {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> distrib(50, 200);
+        
+        for (size_t i = 0; i < starts.size(); ++i) {
+            sf::Color color(distrib(gen), distrib(gen), distrib(gen));
+            agentColors_.push_back(color);
+        }
     }
     
     std::cout << "Set " << starts.size() << " agents with goals" << std::endl;
@@ -91,6 +96,9 @@ void Simulator::render(const std::vector<PlanResult<State, Action, int>>& soluti
     
     // Draw goals
     drawGoals();
+    
+    // Draw paths first (so they appear underneath the agents)
+    drawPaths(solution);
     
     // Draw agents
     drawAgents(solution, timestep, alpha);
@@ -245,24 +253,175 @@ void Simulator::drawGoals() {
     }
 }
 
+void Simulator::drawPaths(const std::vector<PlanResult<State, Action, int>>& solution) {
+    for (size_t i = 0; i < solution.size(); ++i) {
+        const auto& states = solution[i].states;
+        if (states.empty()) continue; // Skip if no states
+        
+        // Get agent color but make it slightly transparent
+        sf::Color pathColor = i < agentColors_.size() ? agentColors_[i] : sf::Color::Red;
+        pathColor.a = 180; // Semi-transparent
+        
+        if (states.size() >= 2) {
+            // Create a vertex array for the path line with thicker line
+            sf::VertexArray pathLines(sf::Triangles);
+            
+            // Create thicker lines using triangles
+            float lineThickness = 3.0f;
+            
+            for (size_t j = 0; j < states.size() - 1; ++j) {
+                const auto& state1 = states[j].first;
+                const auto& state2 = states[j + 1].first;
+                
+                sf::Vector2f pos1 = worldToScreen(state1.x, state1.y);
+                sf::Vector2f pos2 = worldToScreen(state2.x, state2.y);
+                
+                // Center in cell
+                pos1.x += cellSize_ / 2.0f;
+                pos1.y += cellSize_ / 2.0f;
+                pos2.x += cellSize_ / 2.0f;
+                pos2.y += cellSize_ / 2.0f;
+                
+                // Calculate the direction vector and its perpendicular
+                sf::Vector2f direction = pos2 - pos1;
+                float length = std::sqrt(direction.x * direction.x + direction.y * direction.y);
+                
+                if (length > 0) {
+                    direction /= length;
+                    sf::Vector2f perpendicular(-direction.y, direction.x);
+                    
+                    // Calculate the four corners of the line segment
+                    sf::Vector2f offset = perpendicular * lineThickness / 2.0f;
+                    sf::Vector2f v1 = pos1 + offset;
+                    sf::Vector2f v2 = pos1 - offset;
+                    sf::Vector2f v3 = pos2 + offset;
+                    sf::Vector2f v4 = pos2 - offset;
+                    
+                    // Add two triangles to form a rectangle
+                    pathLines.append(sf::Vertex(v1, pathColor));
+                    pathLines.append(sf::Vertex(v2, pathColor));
+                    pathLines.append(sf::Vertex(v3, pathColor));
+                    
+                    pathLines.append(sf::Vertex(v2, pathColor));
+                    pathLines.append(sf::Vertex(v4, pathColor));
+                    pathLines.append(sf::Vertex(v3, pathColor));
+                }
+            }
+            
+            // Draw the path
+            window_.draw(pathLines);
+        }
+        
+        // Draw small circles at each path point
+        sf::CircleShape pointMarker;
+        pointMarker.setRadius(4.0f); // Slightly larger circle
+        
+        for (size_t j = 0; j < states.size(); ++j) {
+            const auto& state = states[j].first;
+            sf::Vector2f position = worldToScreen(state.x, state.y);
+            
+            // Center in cell
+            position.x += cellSize_ / 2.0f - pointMarker.getRadius();
+            position.y += cellSize_ / 2.0f - pointMarker.getRadius();
+            
+            pointMarker.setFillColor(pathColor);
+            pointMarker.setOutlineThickness(1.0f);
+            pointMarker.setOutlineColor(sf::Color::White);
+            pointMarker.setPosition(position);
+            window_.draw(pointMarker);
+        }
+        
+        // Add timestep labels for key points
+        if (font_.getInfo().family != "") {
+            // Only show labels for start, end, and a few points in between if it's a long path
+            std::vector<size_t> indicesToShow;
+            
+            if (states.size() <= 3) {
+                // For short paths, show all timesteps
+                for (size_t j = 0; j < states.size(); ++j) {
+                    indicesToShow.push_back(j);
+                }
+            } else {
+                // For longer paths, show start, end, and some points in between
+                indicesToShow.push_back(0); // Start point
+                
+                // Add some intermediate points
+                size_t step = states.size() / 3;
+                if (step > 0) {
+                    for (size_t j = step; j < states.size() - 1; j += step) {
+                        indicesToShow.push_back(j);
+                    }
+                }
+                
+                indicesToShow.push_back(states.size() - 1); // End point
+            }
+            
+            // Draw the selected timestep labels
+            for (size_t idx : indicesToShow) {
+                const auto& state = states[idx].first;
+                int time = states[idx].second;
+                
+                sf::Vector2f position = worldToScreen(state.x, state.y);
+                
+                sf::Text timeText;
+                timeText.setFont(font_);
+                timeText.setString(std::to_string(time));
+                timeText.setCharacterSize(12);
+                
+                // Create a background for the text
+                sf::RectangleShape textBg;
+                sf::FloatRect textBounds = timeText.getLocalBounds();
+                textBg.setSize(sf::Vector2f(textBounds.width + 6, textBounds.height + 6));
+                textBg.setFillColor(sf::Color(255, 255, 255, 200)); // Semi-transparent white
+                textBg.setOutlineColor(pathColor);
+                textBg.setOutlineThickness(1.0f);
+                
+                // Position text and background
+                textBg.setPosition(
+                    position.x + cellSize_ / 2.0f - textBg.getSize().x / 2.0f,
+                    position.y + cellSize_ / 2.0f - textBg.getSize().y - 12.0f
+                );
+                
+                timeText.setFillColor(sf::Color::Black);
+                timeText.setPosition(
+                    position.x + cellSize_ / 2.0f - textBounds.width / 2.0f - 1.0f,
+                    position.y + cellSize_ / 2.0f - textBounds.height - 15.0f
+                );
+                
+                window_.draw(textBg);
+                window_.draw(timeText);
+            }
+        }
+    }
+}
+
 void Simulator::drawAgents(const std::vector<PlanResult<State, Action, int>>& solution, int timestep, double alpha) {
     sf::CircleShape agentShape;
     agentShape.setRadius(cellSize_ / 3.0f);
     
     for (size_t i = 0; i < solution.size(); ++i) {
-        // Find agent states at current and next timestep for interpolation
-        State currentState = findStateAtTime(solution, i, timestep);
-        State nextState = findStateAtTime(solution, i, timestep + 1);
-        
-        // Interpolate between current and next position
+        // Check if this is timestep 0 and we should use the agent's start position
+        // instead of the solution position
         sf::Vector2f position;
-        if (currentState.x == nextState.x && currentState.y == nextState.y) {
-            position = worldToScreen(currentState.x, currentState.y);
+        
+        if (timestep == 0 && i < agentStarts_.size()) {
+            // At timestep 0, use the possibly updated start position
+            const auto& start = agentStarts_[i];
+            position = worldToScreen(start.x, start.y);
         } else {
-            position = sf::Vector2f(
-                (currentState.x * (1.0f - alpha) + nextState.x * alpha) * cellSize_,
-                (currentState.y * (1.0f - alpha) + nextState.y * alpha) * cellSize_
-            );
+            // For other timesteps, use the original solution (interpolated)
+            State currentState = findStateAtTime(solution, i, timestep);
+            State nextState = findStateAtTime(solution, i, timestep + 1);
+            
+            // Interpolate between current and next position
+            if (currentState.x == nextState.x && currentState.y == nextState.y) {
+                position = worldToScreen(currentState.x, currentState.y);
+            } else {
+                position = sf::Vector2f(
+                    (currentState.x * (1.0f - alpha) + nextState.x * alpha) * cellSize_,
+                    (currentState.y * (1.0f - alpha) + nextState.y * alpha) * cellSize_
+                );
+            }
         }
         
         // Set color and position
@@ -409,4 +568,4 @@ void Simulator::drawDraggedAgent(int agentIdx, int x, int y) {
     
     // We need to display immediately to avoid flicker
     display();
-} 
+}

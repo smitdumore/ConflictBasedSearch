@@ -65,6 +65,7 @@ private:
     void drawGoals();
     void drawAgents(const std::vector<PlanResult<State, Action, int>>& solution, 
                    int currentTimestep, double interpolationAlpha);
+    void drawPaths(const std::vector<PlanResult<State, Action, int>>& solution);
     void drawUI(int currentTimestep);
     void drawMessage();
     sf::Color generateRandomColor() const;
