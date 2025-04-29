@@ -8,7 +8,7 @@
 Controller::Controller()
     : running_(false), paused_(false), initialized_(false), timeMultiplier_(1.0f), secondsPerTimestep_(0.5f),
       timeAccumulator_(0.0f), currentTimestep_(0), interpolationAlpha_(0.0f), maxTimestep_(0),
-      dimX_(0), dimY_(0), draggedAgentIdx_(-1), isDragging_(false)
+      dimX_(0), dimY_(0), draggedAgentIdx_(-1), isDragging_(false), defaultSpaceSlack_(2)
 {
     // Create simulator
     simulator_ = std::make_unique<Simulator>();
@@ -69,6 +69,10 @@ bool Controller::loadMapFromYAML(const std::string& filename) {
             goals_.emplace_back(Location(gx, gy));
         }
 
+        // Initialize slack for all agents
+        agentSlack_.clear();
+        agentSlack_.resize(starts_.size(), defaultSpaceSlack_);  // Use the default slack value
+        
         // Initialize simulator and planner
         if (!setupSimulator() || !initializeVizWindow() || !initializePlanner() || !computeInitialPlan()) {
             return false;
@@ -116,10 +120,9 @@ bool Controller::initializeVizWindow() {
 bool Controller::initializePlanner() {
     // Initialize the environment and planner
     bool disappearAtGoal = false;
-    int spaceSlack = 2;
     int maxNodes = 10000;
 
-    environment_ = std::make_unique<Environment>(dimX_, dimY_, obstacles_, goals_, disappearAtGoal, spaceSlack);
+    environment_ = std::make_unique<Environment>(dimX_, dimY_, obstacles_, goals_, disappearAtGoal, defaultSpaceSlack_);
     planner_ = std::make_unique<CBS<State, Action, int, Conflict, Constraints, Environment>>(*environment_, maxNodes);
 
     return true;
@@ -205,6 +208,8 @@ bool Controller::update(float deltaTime) {
                 for (size_t j = i + 1; j < agentPositions.size(); j++) {
                     if (agentPositions[i].x == agentPositions[j].x && 
                         agentPositions[i].y == agentPositions[j].y) {
+                        
+                        // Collision detected
                         std::cout << "COLLISION DETECTED: Agent " << i 
                                   << " and Agent " << j 
                                   << " at position (" << agentPositions[i].x << "," 
@@ -506,6 +511,31 @@ void Controller::processEvents() {
                         }
                         
                         if (pathTimestep >= 0) {
+                            // Calculate the timestep discrepancy
+                            int timestepDiscrepancy = pathTimestep - currentTimestep_;
+                            
+                            // Subtract the absolute discrepancy from the agent's slack
+                            int discrepancyAbs = std::abs(timestepDiscrepancy);
+                            agentSlack_[draggedAgentIdx_] -= discrepancyAbs;
+                            
+                            std::cout << "Agent " << draggedAgentIdx_ << " used " << discrepancyAbs 
+                                      << " slack for time discrepancy" << std::endl;
+                            std::cout << "Remaining slack: " << agentSlack_[draggedAgentIdx_] << std::endl;
+                            
+                            // Check if agent has run out of slack
+                            if (agentSlack_[draggedAgentIdx_] <= 0) {
+                                std::cout << "AGENT " << draggedAgentIdx_ << " OUT OF SLACK! Exiting..." << std::endl;
+                                simulator_->showMessage("Agent " + std::to_string(draggedAgentIdx_) + 
+                                                      " out of slack! Exiting...", 3.0f);
+                                simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+                                simulator_->display();
+                                
+                                // Small delay to show the message before exiting
+                                std::this_thread::sleep_for(std::chrono::seconds(2));
+                                stop();
+                                return;
+                            }
+                            
                             // Create a new solution for the dragged agent
                             PlanResult<State, Action, int> newSolution;
                             
@@ -525,7 +555,7 @@ void Controller::processEvents() {
                             newSolution.cost = agentSolution.cost;
                             newSolution.fmin = agentSolution.fmin;
                             
-                            // Replace the agent's solution with the new one
+                            // Replace the agent's solution with the new one 
                             agentSolution = newSolution;
                             
                             // Update the max timestep in case our solution extends beyond current max

@@ -73,6 +73,9 @@ private:
     std::vector<State> starts_;
     std::vector<Location> goals_;
     
+    // Slack control
+    int defaultSpaceSlack_;
+    
     // Planning components
     std::unique_ptr<Environment> environment_;
     std::unique_ptr<CBS<State, Action, int, Conflict, Constraints, Environment>> planner_;
@@ -83,6 +86,9 @@ private:
     
     // Agent handling
     int draggedAgentIdx_;
+    
+    // Agent slack tracking
+    std::vector<int> agentSlack_;  // Tracks remaining slack for each agent
     
     // Current drag state
     sf::Vector2i lastMousePosition_;
