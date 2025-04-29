@@ -45,6 +45,10 @@ public:
     void setTimeMultiplier(float multiplier) { timeMultiplier_ = multiplier; }
     float getTimeMultiplier() const { return timeMultiplier_; }
     
+    // Add these methods for seconds per timestep
+    void setSecondsPerTimestep(float seconds) { secondsPerTimestep_ = seconds; }
+    float getSecondsPerTimestep() const { return secondsPerTimestep_; }
+    
     // Timestep accessors
     int getCurrentTimestep() const { return currentTimestep_; }
     int getMaxTimestep() const { return maxTimestep_; }
@@ -75,6 +79,7 @@ private:
     
     // Slack control
     int defaultSpaceSlack_;
+    int AllowableSlackTolerance; 
     
     // Planning components
     std::unique_ptr<Environment> environment_;

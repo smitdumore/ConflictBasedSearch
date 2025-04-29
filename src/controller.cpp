@@ -6,8 +6,8 @@
 #include <yaml-cpp/yaml.h>
 
 Controller::Controller()
-    : running_(false), paused_(false), initialized_(false), timeMultiplier_(1.0f), secondsPerTimestep_(0.5f),
-      timeAccumulator_(0.0f), currentTimestep_(0), interpolationAlpha_(0.0f), maxTimestep_(0),
+    : running_(false), paused_(false), initialized_(false), timeMultiplier_(0.5f), secondsPerTimestep_(1.0f),
+      timeAccumulator_(0.0f), currentTimestep_(0), interpolationAlpha_(0.1f), maxTimestep_(0),
       dimX_(0), dimY_(0), draggedAgentIdx_(-1), isDragging_(false), defaultSpaceSlack_(2)
 {
     // Create simulator
@@ -71,7 +71,8 @@ bool Controller::loadMapFromYAML(const std::string& filename) {
 
         // Initialize slack for all agents
         agentSlack_.clear();
-        agentSlack_.resize(starts_.size(), defaultSpaceSlack_);  // Use the default slack value
+        AllowableSlackTolerance = defaultSpaceSlack_ + 2;
+        agentSlack_.resize(starts_.size(), AllowableSlackTolerance);  // Use the default slack value
         
         // Initialize simulator and planner
         if (!setupSimulator() || !initializeVizWindow() || !initializePlanner() || !computeInitialPlan()) {
@@ -91,14 +92,20 @@ bool Controller::loadMapFromYAML(const std::string& filename) {
 
 bool Controller::setupSimulator() {
     if (simulator_) {
-        simulator_->setMap(std::vector<std::vector<bool>>(dimY_, std::vector<bool>(dimX_, false)));
+        // Create a single map with all obstacles
+        std::vector<std::vector<bool>> map(dimY_, std::vector<bool>(dimX_, false));
         
+        // Set all obstacles in the map
         for (const auto& obstacle : obstacles_) {
-            std::vector<std::vector<bool>> tempMap(dimY_, std::vector<bool>(dimX_, false));
-            tempMap[obstacle.y][obstacle.x] = true;
-            simulator_->setMap(tempMap);
+            if (obstacle.y < dimY_ && obstacle.x < dimX_) {
+                map[obstacle.y][obstacle.x] = true;
+            }
         }
         
+        // Set the complete map with all obstacles
+        simulator_->setMap(map);
+        
+        // Set agents
         simulator_->setAgents(starts_, goals_);
         
         return true;
@@ -173,73 +180,85 @@ bool Controller::update(float deltaTime) {
         return true;
     }
     
-    // For the stub simulator, manually advance time
-    updateCounter++;
-    if (!paused_ && updateCounter % 50 == 0) {  // Every ~0.5 seconds (assuming 10ms sleep)
-        // Don't advance timestep if maxTimestep is 0 (invalid plan)
-        if (maxTimestep_ <= 0) {
-            std::cout << "Warning: No valid plan to simulate (maxTimestep=" << maxTimestep_ << ")" << std::endl;
-            return true;
-        }
+    // Update time accumulator and interpolation alpha
+    if (!paused_) {
+        // Scale deltaTime by time multiplier
+        float scaledDeltaTime = deltaTime * timeMultiplier_;
         
-        // Force timestep advancement
-        currentTimestep_++;
+        // Add the scaled delta to the accumulator
+        timeAccumulator_ += scaledDeltaTime;
         
-        // Print timestep information when it changes
-        if (currentTimestep_ != lastTimestep) {
-            std::cout << "Current timestep: " << currentTimestep_ 
-                      << " / " << maxTimestep_ << std::endl;
+        // Calculate interpolation alpha (0.0 to 1.0)
+        interpolationAlpha_ = timeAccumulator_ / secondsPerTimestep_;
+        
+        // If we've accumulated enough time, advance to next timestep
+        if (timeAccumulator_ >= secondsPerTimestep_) {
+            // Advance timestep
+            currentTimestep_++;
             
-            // Print all agents' current positions and timesteps
-            std::cout << "Agent positions at timestep " << currentTimestep_ << ":" << std::endl;
+            // Reset accumulator, keeping remainder for smooth transitions
+            timeAccumulator_ -= secondsPerTimestep_;
             
-            // Collect all agent positions for collision detection
-            std::vector<State> agentPositions;
+            // Recalculate interpolation alpha with the remainder
+            interpolationAlpha_ = timeAccumulator_ / secondsPerTimestep_;
             
-            for (size_t i = 0; i < solution_.size(); i++) {
-                State agentState = getCurrentAgentPosition(i);
-                agentPositions.push_back(agentState);
-                std::cout << "  Agent " << i << ": (" << agentState.x << "," << agentState.y 
-                          << "), timestep: " << currentTimestep_ << std::endl;
-            }
-            
-            // Check for collisions between agents
-            for (size_t i = 0; i < agentPositions.size(); i++) {
-                for (size_t j = i + 1; j < agentPositions.size(); j++) {
-                    if (agentPositions[i].x == agentPositions[j].x && 
-                        agentPositions[i].y == agentPositions[j].y) {
-                        
-                        // Collision detected
-                        std::cout << "COLLISION DETECTED: Agent " << i 
-                                  << " and Agent " << j 
-                                  << " at position (" << agentPositions[i].x << "," 
-                                  << agentPositions[i].y << ") at timestep " 
-                                  << currentTimestep_ << std::endl;
-                        
-                        simulator_->showMessage("COLLISION DETECTED! Exiting...", 3.0f);
-                        simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
-                        simulator_->display();
-                        
-                        // Small delay to show the message before exiting
-                        std::this_thread::sleep_for(std::chrono::seconds(2));
-                        stop();
-                        return false;
+            // Print timestep information when it changes
+            if (currentTimestep_ != lastTimestep) {
+                std::cout << "Current timestep: " << currentTimestep_ 
+                          << " / " << maxTimestep_ << std::endl;
+                
+                // Print all agents' current positions and timesteps
+                std::cout << "Agent positions at timestep " << currentTimestep_ << ":" << std::endl;
+                
+                // Collect all agent positions for collision detection
+                std::vector<State> agentPositions;
+                
+                for (size_t i = 0; i < solution_.size(); i++) {
+                    State agentState = getCurrentAgentPosition(i);
+                    agentPositions.push_back(agentState);
+                    std::cout << "  Agent " << i << ": (" << agentState.x << "," << agentState.y 
+                              << "), timestep: " << currentTimestep_ << std::endl;
+                }
+                
+                // Check for collisions between agents
+                for (size_t i = 0; i < agentPositions.size(); i++) {
+                    for (size_t j = i + 1; j < agentPositions.size(); j++) {
+                        if (agentPositions[i].x == agentPositions[j].x && 
+                            agentPositions[i].y == agentPositions[j].y) {
+                            
+                            // Collision detected
+                            std::cout << "COLLISION DETECTED: Agent " << i 
+                                      << " and Agent " << j 
+                                      << " at position (" << agentPositions[i].x << "," 
+                                      << agentPositions[i].y << ") at timestep " 
+                                      << currentTimestep_ << std::endl;
+                            
+                            simulator_->showMessage("COLLISION DETECTED! Exiting...", 3.0f);
+                            simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+                            simulator_->display();
+                            
+                            // Small delay to show the message before exiting
+                            std::this_thread::sleep_for(std::chrono::seconds(2));
+                            stop();
+                            return false;
+                        }
                     }
                 }
+                
+                lastTimestep = currentTimestep_;
             }
             
-            lastTimestep = currentTimestep_;
-        }
-        
-        // Check if we've reached the end of the plan
-        if (currentTimestep_ >= maxTimestep_) {
-            currentTimestep_ = maxTimestep_;
-            paused_ = true;  // Auto-pause at the end
-            std::cout << "Simulation complete - reached maximum timestep" << std::endl;
-            return false;
+            // Check if we've reached the end of the plan
+            if (currentTimestep_ >= maxTimestep_) {
+                currentTimestep_ = maxTimestep_;
+                paused_ = true;  // Auto-pause at the end
+                std::cout << "Simulation complete - reached maximum timestep" << std::endl;
+                return false;
+            }
         }
     }
     
+    updateCounter++;
     return true;
 }
 
@@ -419,15 +438,6 @@ bool Controller::validateAgentPositions(const std::vector<State>& positions) con
     }
     
     return true;
-}
-
-void Controller::resetSimulation() {
-    currentTimestep_ = 0;
-    interpolationAlpha_ = 0.0f;
-    timeAccumulator_ = 0.0f;
-    
-    // Reset to initial state
-    std::cout << "Simulation reset" << std::endl;
 }
 
 void Controller::processEvents() {
@@ -636,4 +646,13 @@ bool Controller::checkCollisionAtPosition(int agentIdx, int x, int y, int timest
     // No collision found
     collidingAgent = -1;
     return false;
+}
+
+void Controller::resetSimulation() {
+    currentTimestep_ = 0;
+    timeAccumulator_ = 0.0f;
+    interpolationAlpha_ = 0.0f;
+    
+    // Reset to initial state
+    std::cout << "Simulation reset" << std::endl;
 } 

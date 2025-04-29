@@ -23,6 +23,7 @@ public:
     void closeWindow();
     bool isWindowOpen() const;
     void processEvents();
+    sf::RenderWindow& getWindow() { return window_; }
     
     // Map and agent setup
     void setMap(const std::vector<std::vector<bool>>& map);
