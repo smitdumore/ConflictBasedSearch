@@ -127,13 +127,21 @@ class CBS {
         int thickness = maxThickness - static_cast<int>((maxThickness - 1) * (float(agent) / (solution.size() - 1)));
 
         for (size_t i = 1; i < path.size(); ++i) {
-            const auto& prev = path[i - 1].first;
-            const auto& curr = path[i].first;
+          int t_prev = path[i - 1].second;
+          int t_curr = path[i].second;
 
-            cv::line(img,
-                    cv::Point(prev.x * scale + scale / 2, prev.y * scale + scale / 2),
-                    cv::Point(curr.x * scale + scale / 2, curr.y * scale + scale / 2),
-                    color, thickness);
+          // If conflict is present, only draw up to conflict time
+          if (conflict && (t_prev > conflict->time || t_curr > conflict->time)) {
+              break;
+          }
+
+          const auto& prev = path[i - 1].first;
+          const auto& curr = path[i].first;
+
+          cv::line(img,
+                  cv::Point(prev.x * scale + scale / 2, prev.y * scale + scale / 2),
+                  cv::Point(curr.x * scale + scale / 2, curr.y * scale + scale / 2),
+                  color, thickness);
         }
     }
 
@@ -151,34 +159,36 @@ class CBS {
 
     // Draw conflict location on top
     std::string winTitle = "Node " + std::to_string(nodeId);
-    // Highlight conflict clearly with a solid black circle (same as agent radius)
+
+    // Reduced circle radius for subtler visualization
+    int conflictMarkerRadius = std::max(2, agentRadius / 2);
+
     if (conflict != nullptr) {
         if (conflict->type == Conflict::Vertex) {
             cv::circle(img,
                       cv::Point(conflict->x1 * scale + scale / 2,
                                 conflict->y1 * scale + scale / 2),
-                      agentRadius, cv::Scalar(0, 0, 0), cv::FILLED);
-            winTitle += " | Vertex Conflict at (" + std::to_string(conflict->x1) + "," + std::to_string(conflict->y1) + ")";
+                      conflictMarkerRadius, cv::Scalar(0, 0, 0), cv::FILLED);
 
-            std::cout << "vertex at" << conflict->x1 << " " << conflict->y1 << std::endl;
+            winTitle += " | Vertex Conflict at (" + std::to_string(conflict->x1) + "," + std::to_string(conflict->y1) + ")";
+            std::cout << "vertex at " << conflict->x1 << " " << conflict->y1 << std::endl;
+
         } else if (conflict->type == Conflict::Edge) {
-            // Draw a circle at both points of the edge conflict
-            cv::circle(img,
-                      cv::Point(conflict->x1 * scale + scale / 2,
-                                conflict->y1 * scale + scale / 2),
-                      agentRadius, cv::Scalar(0, 0, 0), cv::FILLED);
-            cv::circle(img,
-                      cv::Point(conflict->x2 * scale + scale / 2,
-                                conflict->y2 * scale + scale / 2),
-                      agentRadius, cv::Scalar(0, 0, 0), cv::FILLED);
-            winTitle += " | Edge Conflict: (" + std::to_string(conflict->x1) + "," + std::to_string(conflict->y1) + ") -> ("
+            // Solid line between the two conflicting edge points
+            cv::line(img,
+                    cv::Point(conflict->x1 * scale + scale / 2,
+                              conflict->y1 * scale + scale / 2),
+                    cv::Point(conflict->x2 * scale + scale / 2,
+                              conflict->y2 * scale + scale / 2),
+                    cv::Scalar(0, 0, 0), 3, cv::LINE_AA);
+
+            winTitle += " | Edge Conflict: (" + std::to_string(conflict->x1) + "," + std::to_string(conflict->y1) + ") → ("
                         + std::to_string(conflict->x2) + "," + std::to_string(conflict->y2) + ")";
-            
-            std::cout << "edge at" << conflict->x1 << " " << conflict->y1 << std::endl;
+            std::cout << "edge from " << conflict->x1 << "," << conflict->y1
+                      << " to " << conflict->x2 << "," << conflict->y2 << std::endl;
         }
-    }else{
-      std::cout <<"nolllllll";
     }
+
 
 
     cv::imshow(winTitle, img);
