@@ -186,6 +186,43 @@ bool Controller::update(float deltaTime) {
         if (currentTimestep_ != lastTimestep) {
             std::cout << "Current timestep: " << currentTimestep_ 
                       << " / " << maxTimestep_ << std::endl;
+            
+            // Print all agents' current positions and timesteps
+            std::cout << "Agent positions at timestep " << currentTimestep_ << ":" << std::endl;
+            
+            // Collect all agent positions for collision detection
+            std::vector<State> agentPositions;
+            
+            for (size_t i = 0; i < solution_.size(); i++) {
+                State agentState = getCurrentAgentPosition(i);
+                agentPositions.push_back(agentState);
+                std::cout << "  Agent " << i << ": (" << agentState.x << "," << agentState.y 
+                          << "), timestep: " << currentTimestep_ << std::endl;
+            }
+            
+            // Check for collisions between agents
+            for (size_t i = 0; i < agentPositions.size(); i++) {
+                for (size_t j = i + 1; j < agentPositions.size(); j++) {
+                    if (agentPositions[i].x == agentPositions[j].x && 
+                        agentPositions[i].y == agentPositions[j].y) {
+                        std::cout << "COLLISION DETECTED: Agent " << i 
+                                  << " and Agent " << j 
+                                  << " at position (" << agentPositions[i].x << "," 
+                                  << agentPositions[i].y << ") at timestep " 
+                                  << currentTimestep_ << std::endl;
+                        
+                        simulator_->showMessage("COLLISION DETECTED! Exiting...", 3.0f);
+                        simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+                        simulator_->display();
+                        
+                        // Small delay to show the message before exiting
+                        std::this_thread::sleep_for(std::chrono::seconds(2));
+                        stop();
+                        return false;
+                    }
+                }
+            }
+            
             lastTimestep = currentTimestep_;
         }
         
@@ -412,7 +449,7 @@ void Controller::processEvents() {
                     if (!paused_) {
                         paused_ = true;
                     }
-                    std::cout << "Started dragging agent " << agentIdx << std::endl;
+                    std::cout << "Started dragging agent " << agentIdx << " at timestep " << currentTimestep_ << std::endl;
                 }
             }
             else if (isDragging_ && mouseMoved) {
@@ -432,26 +469,112 @@ void Controller::processEvents() {
                 
                 // Update the start position for the agent
                 if (draggedAgentIdx_ < static_cast<int>(starts_.size())) {
+                    // Create updated state - CORRECT ORDER IS (time, x, y)
+                    State updatedState(0, worldPos.x, worldPos.y);
                     starts_[draggedAgentIdx_] = updatedState;
                     
-                    // Keep the original solution to preserve the path visualization
-                    // No need to modify solution_ at all
+                    // Check if the dropped position is on the agent's path
+                    bool isOnPath = false;
+                    int pathTimestep = -1;
+                    for (const auto& [state, time] : solution_[draggedAgentIdx_].states) {
+                        if (state.x == worldPos.x && state.y == worldPos.y) {
+                            isOnPath = true;
+                            pathTimestep = time;
+                            break;
+                        }
+                    }
                     
-                    std::cout << "Agent " << draggedAgentIdx_ << " moved to (" 
-                              << worldPos.x << "," << worldPos.y << ")" << std::endl;
+                    std::cout << "Agent " << draggedAgentIdx_ << " dropped at position (" 
+                              << worldPos.x << "," << worldPos.y << ") at timestep " 
+                              << currentTimestep_ << std::endl;
+                    std::cout << "The dropped position is " << (isOnPath ? "ON" : "NOT ON") 
+                              << " the agent's planned path" << std::endl;
                               
-                    // Show a message in the simulator
-                    simulator_->showMessage("Agent " + std::to_string(draggedAgentIdx_) + 
-                                          " moved to (" + std::to_string(worldPos.x) + 
-                                          "," + std::to_string(worldPos.y) + ")", 3.0f);
+                    if (isOnPath) {
+                        // Find the state in the solution that matches the dropped position
+                        auto& agentSolution = solution_[draggedAgentIdx_];
+                        
+                        // Find the matching state and its timestep in the original path
+                        int pathTimestep = -1;
+                        State droppedState(-1, -1, -1);  // Initialize with dummy values
+                        for (const auto& [state, time] : agentSolution.states) {
+                            if (state.x == worldPos.x && state.y == worldPos.y) {
+                                pathTimestep = time;
+                                droppedState = state;
+                                break;
+                            }
+                        }
+                        
+                        if (pathTimestep >= 0) {
+                            // Create a new solution for the dragged agent
+                            PlanResult<State, Action, int> newSolution;
+                            
+                            // Add the current state at the current timestep
+                            newSolution.states.push_back({droppedState, currentTimestep_});
+                            
+                            // Add all future states from the original path, adjusting their timesteps
+                            for (const auto& [state, time] : agentSolution.states) {
+                                if (time > pathTimestep) {
+                                    // Adjust the timestep to maintain the same relative distance
+                                    int adjustedTime = currentTimestep_ + (time - pathTimestep);
+                                    newSolution.states.push_back({state, adjustedTime});
+                                }
+                            }
+                            
+                            // Preserve the cost and fmin values from the original solution
+                            newSolution.cost = agentSolution.cost;
+                            newSolution.fmin = agentSolution.fmin;
+                            
+                            // Replace the agent's solution with the new one
+                            agentSolution = newSolution;
+                            
+                            // Update the max timestep in case our solution extends beyond current max
+                            if (!newSolution.states.empty()) {
+                                int agentMaxTime = newSolution.states.back().second;
+                                maxTimestep_ = std::max(maxTimestep_, agentMaxTime);
+                            }
+                            
+                            std::cout << "Agent " << draggedAgentIdx_ << " moved to position (" 
+                                      << worldPos.x << "," << worldPos.y << ") from its path at original timestep " 
+                                      << pathTimestep << " and will continue from current timestep " 
+                                      << currentTimestep_ << std::endl;
+                            
+                            // Print all agents' positions after drag operation
+                            std::cout << "All agent positions after drag operation:" << std::endl;
+                            for (size_t i = 0; i < solution_.size(); i++) {
+                                State agentState = getCurrentAgentPosition(i);
+                                std::cout << "  Agent " << i << ": (" << agentState.x << "," << agentState.y 
+                                          << "), timestep: " << currentTimestep_ << std::endl;
+                            }
+                            
+                            // Immediately render to show the updated path
+                            simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+                            simulator_->display();
+                            
+                            // Resume simulation if it was paused
+                            if (paused_) {
+                                paused_ = false;
+                                std::cout << "Simulation resumed after agent repositioning" << std::endl;
+                            }
+                            
+                            // No collision, continue simulation
+                            simulator_->showMessage("Agent " + std::to_string(draggedAgentIdx_) + 
+                                                 " continuing from position on its path", 3.0f);
+                        } else {
+                            // If we didn't find the position on the path, show an error
+                            std::cout << "Error: Position was detected as on path but matching state not found" << std::endl;
+                            simulator_->showMessage("Error finding position on agent's path", 3.0f);
+                        }
+                    } else {
+                        // Not on path, just show message
+                        simulator_->showMessage("Agent " + std::to_string(draggedAgentIdx_) + 
+                                              " moved to (" + std::to_string(worldPos.x) + 
+                                              "," + std::to_string(worldPos.y) + ")", 3.0f);
+                    }
                     
                     // Force a re-render to show the updated position
                     simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
                     simulator_->display();
-                    
-                    // Exit the application after moving an agent
-                    std::cout << "Agent moved. Exiting application." << std::endl;
-                    stop();
                 }
             } else {
                 // Invalid position - show error message
@@ -464,4 +587,23 @@ void Controller::processEvents() {
             isDragging_ = false;
         }
     }
+}
+
+bool Controller::checkCollisionAtPosition(int agentIdx, int x, int y, int timestep, int& collidingAgent) const {
+    // Get all agent positions at the current timestep
+    for (size_t i = 0; i < solution_.size(); i++) {
+        if (i == static_cast<size_t>(agentIdx)) continue; // Skip the agent we're checking
+        
+        State agentState = getCurrentAgentPosition(i);
+        
+        // Check for collision
+        if (agentState.x == x && agentState.y == y) {
+            collidingAgent = i;
+            return true;
+        }
+    }
+    
+    // No collision found
+    collidingAgent = -1;
+    return false;
 } 

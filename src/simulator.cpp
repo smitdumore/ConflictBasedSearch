@@ -46,7 +46,7 @@ void Simulator::setAgents(const std::vector<State>& starts, const std::vector<Lo
     // Only set if we haven't set agents before, otherwise keep the existing positions
     // for any agents that might have been moved
     if (agentStarts_.empty()) {
-        agentStarts_ = starts;
+    agentStarts_ = starts;
     }
     agentGoals_ = goals;
     

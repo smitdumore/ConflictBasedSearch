@@ -95,4 +95,5 @@ private:
     void resetSimulation();
     void processEvents();
     bool handleAgentDrag(int agentIdx, int x, int y);
+    bool checkCollisionAtPosition(int agentIdx, int x, int y, int timestep, int& collidingAgent) const;
 }; 
