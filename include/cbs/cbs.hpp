@@ -3,6 +3,9 @@
 #include <map>
 
 #include "a_star.hpp"
+#include "location.hpp"
+#include <opencv2/opencv.hpp>
+
 
 namespace MultiRobotPlanning {
 
@@ -89,6 +92,101 @@ class CBS {
   public:
   CBS(Environment& environment) : m_env(environment) {}
 
+  void visualizeNode(int nodeId,
+                   const std::vector<PlanResult<State, Action, int>>& solution,
+                   const Conflict* conflict,
+                   const std::unordered_set<Location>& obstacles,
+                   int dimx, int dimy)
+  {
+    const int scale = 40;
+    const int agentRadius = 10;
+    const int maxThickness = 8;
+
+    cv::Mat img(dimy * scale, dimx * scale, CV_8UC3, cv::Scalar(255, 255, 255));
+
+    // Draw obstacles
+    for (const auto& obs : obstacles) {
+        cv::rectangle(img,
+                      cv::Point(obs.x * scale, obs.y * scale),
+                      cv::Point((obs.x + 1) * scale, (obs.y + 1) * scale),
+                      cv::Scalar(0, 0, 0), cv::FILLED);
+    }
+
+    // Assign consistent random color to each agent
+    auto getColorForAgent = [](int agentId) -> cv::Scalar {
+        cv::RNG rng(agentId * 1000);
+        return cv::Scalar(rng.uniform(64, 255), rng.uniform(64, 255), rng.uniform(64, 255));
+    };
+
+    // ✅ Correct: thickest drawn first
+    for (size_t agent = 0; agent < solution.size(); ++agent) {
+        const auto& path = solution[agent].states;
+        cv::Scalar color = getColorForAgent(agent);
+
+        // Thickest first, decreasing
+        int thickness = maxThickness - static_cast<int>((maxThickness - 1) * (float(agent) / (solution.size() - 1)));
+
+        for (size_t i = 1; i < path.size(); ++i) {
+            const auto& prev = path[i - 1].first;
+            const auto& curr = path[i].first;
+
+            cv::line(img,
+                    cv::Point(prev.x * scale + scale / 2, prev.y * scale + scale / 2),
+                    cv::Point(curr.x * scale + scale / 2, curr.y * scale + scale / 2),
+                    color, thickness);
+        }
+    }
+
+    // Draw agent positions on top
+    for (size_t agent = 0; agent < solution.size(); ++agent) {
+        const auto& path = solution[agent].states;
+        if (!path.empty()) {
+            const auto& p = path[0].first;
+            cv::Scalar color = getColorForAgent(agent);
+            cv::circle(img,
+                       cv::Point(p.x * scale + scale / 2, p.y * scale + scale / 2),
+                       agentRadius, color, cv::FILLED);
+        }
+    }
+
+    // Draw conflict location on top
+    std::string winTitle = "Node " + std::to_string(nodeId);
+    // Highlight conflict clearly with a solid black circle (same as agent radius)
+    if (conflict != nullptr) {
+        if (conflict->type == Conflict::Vertex) {
+            cv::circle(img,
+                      cv::Point(conflict->x1 * scale + scale / 2,
+                                conflict->y1 * scale + scale / 2),
+                      agentRadius, cv::Scalar(0, 0, 0), cv::FILLED);
+            winTitle += " | Vertex Conflict at (" + std::to_string(conflict->x1) + "," + std::to_string(conflict->y1) + ")";
+
+            std::cout << "vertex at" << conflict->x1 << " " << conflict->y1 << std::endl;
+        } else if (conflict->type == Conflict::Edge) {
+            // Draw a circle at both points of the edge conflict
+            cv::circle(img,
+                      cv::Point(conflict->x1 * scale + scale / 2,
+                                conflict->y1 * scale + scale / 2),
+                      agentRadius, cv::Scalar(0, 0, 0), cv::FILLED);
+            cv::circle(img,
+                      cv::Point(conflict->x2 * scale + scale / 2,
+                                conflict->y2 * scale + scale / 2),
+                      agentRadius, cv::Scalar(0, 0, 0), cv::FILLED);
+            winTitle += " | Edge Conflict: (" + std::to_string(conflict->x1) + "," + std::to_string(conflict->y1) + ") -> ("
+                        + std::to_string(conflict->x2) + "," + std::to_string(conflict->y2) + ")";
+            
+            std::cout << "edge at" << conflict->x1 << " " << conflict->y1 << std::endl;
+        }
+    }else{
+      std::cout <<"nolllllll";
+    }
+
+
+    cv::imshow(winTitle, img);
+    cv::waitKey(700);
+    cv::destroyWindow(winTitle);
+  }
+
+
   bool search(const std::vector<State>& initialStates,
               std::vector<PlanResult<State, Action, Cost> >& solution) {
 
@@ -141,12 +239,23 @@ class CBS {
       open.pop();
 
       Conflict conflict; 
-      if (!m_env.getFirstConflict(currCTNode.solution, conflict)) {       // Environment owns finding conflicts
+      bool hasConflict = m_env.getFirstConflict(currCTNode.solution, conflict);
+
+      // Always visualize the current node
+      if (hasConflict) {
+          visualizeNode(currCTNode.id, currCTNode.solution, &conflict, m_env.getObstacles(), m_env.getWidth(), m_env.getHeight());
+      } else {
+          visualizeNode(currCTNode.id, currCTNode.solution, nullptr, m_env.getObstacles(), m_env.getWidth(), m_env.getHeight());
+      }
+
+      if (!hasConflict) {
         // if didnt get any conflict then return the solution of that node
         std::cout << "CBS done; cost: " << currCTNode.cost << std::endl;
         solution = currCTNode.solution;
         return true;
       }
+
+      visualizeNode(currCTNode.id, currCTNode.solution, nullptr, m_env.getObstacles(), m_env.getWidth(), m_env.getHeight());
 
       // Create additional nodes to resolve conflict
       // Also convert conflicts into constraints for next CT node search

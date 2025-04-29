@@ -226,38 +226,6 @@ struct Constraints {
   }
 };
 /*******************************************ALL CONSTRAINT*****************************************************/
-
-// THIS IS STATE WITHOUT TIME
-struct Location {
-  Location(int x, int y) : x(x), y(y) {}
-  int x;
-  int y;
-
-  bool operator<(const Location& other) const {
-    return std::tie(x, y) < std::tie(other.x, other.y);
-  }
-
-  bool operator==(const Location& other) const {
-    return std::tie(x, y) == std::tie(other.x, other.y);
-  }
-
-  friend std::ostream& operator<<(std::ostream& os, const Location& c) {
-    return os << "(" << c.x << "," << c.y << ")";
-  }
-};
-
-namespace std {
-template <>
-struct hash<Location> {
-  size_t operator()(const Location& s) const {
-    size_t seed = 0;
-    boost::hash_combine(seed, s.x);
-    boost::hash_combine(seed, s.y);
-    return seed;
-  }
-};
-}  // namespace std
-
 /*******************************************ENVIRONMENT****************************************************/
 class Environment {
  public:
@@ -290,6 +258,10 @@ class Environment {
       }
     }
   }
+
+  const std::unordered_set<Location>& getObstacles() const { return m_obstacles; }
+  int getWidth() const { return m_dimx; }
+  int getHeight() const { return m_dimy; }
 
   int admissibleHeuristic(const State& s) {
     // std::cout << "H: " <<  s << " " << m_heuristic[m_agentIdx][s.x + m_dimx *
