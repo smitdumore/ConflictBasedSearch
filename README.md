@@ -9,7 +9,10 @@
 ```
 cd build
 ./run_cbs -i ../maps/map_experiment.yaml -o output.yaml
+ dot -Tpng tree.dot -o tree.png
+```
 
+```
 cd ..
 python3 visualize.py maps/map_experiment.yaml /home/smit/catkin_ws/src/cbs/build/output.yaml
 ```

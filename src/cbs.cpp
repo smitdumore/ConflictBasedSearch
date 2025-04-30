@@ -700,7 +700,23 @@ int main(int argc, char* argv[]) {
       }
     }
 
-    // print cost and makespan
+    //auto& parentMap = cbs.getParentMap();
+
+    // Export conflict tree structure to DOT
+    std::ofstream dotFile("tree.dot");
+    dotFile << "digraph CBS_Tree {\n";
+    dotFile << "    node [shape=box, imagepos=tc, labelloc=b, fontsize=10];\n";
+
+    for (const auto& [child, parent] : cbs.parentMap) {
+        dotFile << "    node" << child << " [label=\"Node " << child
+                << "\", image=\"node_" << child << ".png\"];\n";
+        dotFile << "    node" << parent << " [label=\"Node " << parent
+                << "\", image=\"node_" << parent << ".png\"];\n";
+        dotFile << "    node" << parent << " -> node" << child << ";\n";
+    }
+
+    dotFile << "}\n";
+    dotFile.close();
   } else {
     std::cout << "Planning NOT successful!" << std::endl;
   }

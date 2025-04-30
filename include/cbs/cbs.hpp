@@ -88,9 +88,12 @@ class CBS {
   private:
     Environment& m_env;
     typedef AStar<State, Action, Cost, LowLevelEnvironment> LowLevelSearch_t;
+    std::map<int, Conflict> nodeConflicts;
 
   public:
   CBS(Environment& environment) : m_env(environment) {}
+
+  std::map<int, int> parentMap;  // child_id → parent_id
 
   void visualizeNode(int nodeId,
                    const std::vector<PlanResult<State, Action, int>>& solution,
@@ -161,41 +164,57 @@ class CBS {
     std::string winTitle = "Node " + std::to_string(nodeId);
 
     // Reduced circle radius for subtler visualization
-    int conflictMarkerRadius = std::max(2, agentRadius / 2);
+    int conflictMarkerRadius = agentRadius;
 
     if (conflict != nullptr) {
-        if (conflict->type == Conflict::Vertex) {
-            cv::circle(img,
-                      cv::Point(conflict->x1 * scale + scale / 2,
-                                conflict->y1 * scale + scale / 2),
-                      conflictMarkerRadius, cv::Scalar(0, 0, 0), cv::FILLED);
-
-            winTitle += " | Vertex Conflict at (" + std::to_string(conflict->x1) + "," + std::to_string(conflict->y1) + ")";
-            std::cout << "vertex at " << conflict->x1 << " " << conflict->y1 << std::endl;
-
-        } else if (conflict->type == Conflict::Edge) {
-            // Solid line between the two conflicting edge points
-            cv::line(img,
-                    cv::Point(conflict->x1 * scale + scale / 2,
-                              conflict->y1 * scale + scale / 2),
-                    cv::Point(conflict->x2 * scale + scale / 2,
-                              conflict->y2 * scale + scale / 2),
-                    cv::Scalar(0, 0, 0), 3, cv::LINE_AA);
-
-            winTitle += " | Edge Conflict: (" + std::to_string(conflict->x1) + "," + std::to_string(conflict->y1) + ") → ("
-                        + std::to_string(conflict->x2) + "," + std::to_string(conflict->y2) + ")";
-            std::cout << "edge from " << conflict->x1 << "," << conflict->y1
-                      << " to " << conflict->x2 << "," << conflict->y2 << std::endl;
-        }
+      std::cout << "[Node " << nodeId << "] conflict time: " << conflict->time
+              << " type: " << (conflict->type == Conflict::Vertex ? "Vertex" : "Edge")
+              << std::endl;
     }
 
 
+    // After everything else is drawn, draw conflict marker
+    // Define a red color
+    if (conflict != nullptr) {
+      // Define a red color
+      cv::Scalar red(0, 0, 255);
+      int crossSize = scale / 2;
+      int thickness = 2;
 
-    cv::imshow(winTitle, img);
-    cv::waitKey(700);
-    cv::destroyWindow(winTitle);
+      if (conflict->type == Conflict::Vertex) {
+          // Draw red X at (x1, y1)
+          cv::Point center(conflict->x1 * scale + scale / 2, conflict->y1 * scale + scale / 2);
+          cv::line(img, center + cv::Point(-crossSize / 2, -crossSize / 2),
+                        center + cv::Point(crossSize / 2,  crossSize / 2),
+                        red, thickness);
+          cv::line(img, center + cv::Point(-crossSize / 2,  crossSize / 2),
+                        center + cv::Point(crossSize / 2, -crossSize / 2),
+                        red, thickness);
+      } else if (conflict->type == Conflict::Edge) {
+          // Midpoint of (x1,y1) and (x2,y2)
+          cv::Point p1(conflict->x1 * scale + scale / 2, conflict->y1 * scale + scale / 2);
+          cv::Point p2(conflict->x2 * scale + scale / 2, conflict->y2 * scale + scale / 2);
+          cv::Point mid = (p1 + p2) / 2;
+
+          // Draw red X at midpoint
+          cv::line(img, mid + cv::Point(-crossSize / 2, -crossSize / 2),
+                        mid + cv::Point(crossSize / 2,  crossSize / 2),
+                        red, thickness);
+          cv::line(img, mid + cv::Point(-crossSize / 2,  crossSize / 2),
+                        mid + cv::Point(crossSize / 2, -crossSize / 2),
+                        red, thickness);
+      }
+    }
+
+    
+
+    std::string filename = "node_" + std::to_string(nodeId) + ".png";
+    cv::waitKey(1);   // <-- force OpenCV to finalize all drawing operations
+    cv::imwrite(filename, img);
+
   }
 
+  std::map<int, int>& getParentMap() { return parentMap; }
 
   bool search(const std::vector<State>& initialStates,
               std::vector<PlanResult<State, Action, Cost> >& solution) {
@@ -242,72 +261,77 @@ class CBS {
     solution.clear();
     int id = 1; // id for the first child, root id was 0
 
-    while (!open.empty()) {
+      while (!open.empty()) {
 
-      // Current Conflict Tree Node
-      HighLevelNode currCTNode = open.top();
-      open.pop();
+        // Current Conflict Tree Node
+        HighLevelNode currCTNode = open.top();
+        open.pop();
 
-      Conflict conflict; 
-      bool hasConflict = m_env.getFirstConflict(currCTNode.solution, conflict);
+        // Visualize the node with the conflict that created it
+        auto it = nodeConflicts.find(currCTNode.id);
+        const Conflict* conflictPtr = (it != nodeConflicts.end()) ? &(it->second) : nullptr;
+        visualizeNode(currCTNode.id, currCTNode.solution, conflictPtr,
+                      m_env.getObstacles(), m_env.getWidth(), m_env.getHeight());
 
-      // Always visualize the current node
-      if (hasConflict) {
-          visualizeNode(currCTNode.id, currCTNode.solution, &conflict, m_env.getObstacles(), m_env.getWidth(), m_env.getHeight());
-      } else {
-          visualizeNode(currCTNode.id, currCTNode.solution, nullptr, m_env.getObstacles(), m_env.getWidth(), m_env.getHeight());
-      }
+        Conflict conflict; 
+        bool hasConflict = m_env.getFirstConflict(currCTNode.solution, conflict);
 
-      if (!hasConflict) {
-        // if didnt get any conflict then return the solution of that node
-        std::cout << "CBS done; cost: " << currCTNode.cost << std::endl;
-        solution = currCTNode.solution;
-        return true;
-      }
+        if (!hasConflict) {
+          // if didnt get any conflict then return the solution of that node
+          std::cout << "CBS done; cost: " << currCTNode.cost << std::endl;
 
-      visualizeNode(currCTNode.id, currCTNode.solution, nullptr, m_env.getObstacles(), m_env.getWidth(), m_env.getHeight());
+           // Visualize solution node (no conflict)
+          visualizeNode(currCTNode.id, currCTNode.solution, nullptr,
+                  m_env.getObstacles(), m_env.getWidth(), m_env.getHeight());
 
-      // Create additional nodes to resolve conflict
-      // Also convert conflicts into constraints for next CT node search
-
-      std::map<size_t, Constraints> constraints;
-      m_env.createConstraintsFromConflict(conflict, constraints); // Constraints data struct stores mapping of agent id to its resp. constraints
-
-      // Visit neighbors step in BFS
-      // Creating a new node for every constraint
-      for (const auto& c : constraints) {
-        
-        size_t i = c.first; // agent id
-        
-        HighLevelNode newNode = currCTNode;
-        newNode.id = id;
-        
-        assert(!newNode.constraints[i].overlap(c.second)); // checks for duplicated constraints
-
-        // Add the current constraint to the current CT node
-        newNode.constraints[i].add(c.second); // i is the agent id obtained from the current contraint
-        newNode.cost -= newNode.solution[i].cost;
-
-        // Run low level stuff again        
-        LowLevelEnvironment llenv(m_env, i, newNode.constraints[i]);
-        LowLevelSearch_t lowLevel(llenv);
-        bool success = lowLevel.search(initialStates[i], newNode.solution[i]);
-
-        newNode.cost += newNode.solution[i].cost;
-
-        if (success) {
-          // std::cout << "  success. cost: " << newNode.cost << std::endl;
-          auto handle = open.push(newNode);
-          (*handle).handle = handle;
+          solution = currCTNode.solution;
+          return true;
         }
 
-        // new id for new CT nodes
-        ++id;
-      }
-    }
+        // Create additional nodes to resolve conflict
+        // Also convert conflicts into constraints for next CT node search
 
-    return false;
-  }
-};
+        std::map<size_t, Constraints> constraints;
+        m_env.createConstraintsFromConflict(conflict, constraints); // Constraints data struct stores mapping of agent id to its resp. constraints
+
+        // Visit neighbors step in BFS
+        // Creating a new node for every constraint
+        for (const auto& c : constraints) {
+          
+          size_t i = c.first; // agent id
+          
+          HighLevelNode newNode = currCTNode;
+          newNode.id = id;
+          parentMap[newNode.id] = currCTNode.id;
+          nodeConflicts[newNode.id] = conflict;
+          
+          assert(!newNode.constraints[i].overlap(c.second)); // checks for duplicated constraints
+
+          // Add the current constraint to the current CT node
+          newNode.constraints[i].add(c.second); // i is the agent id obtained from the current contraint
+          newNode.cost -= newNode.solution[i].cost;
+
+          // Run low level stuff again        
+          LowLevelEnvironment llenv(m_env, i, newNode.constraints[i]);
+          LowLevelSearch_t lowLevel(llenv);
+          bool success = lowLevel.search(initialStates[i], newNode.solution[i]);
+
+          newNode.cost += newNode.solution[i].cost;
+
+          if (success) {
+            // std::cout << "  success. cost: " << newNode.cost << std::endl;
+            auto handle = open.push(newNode);
+            (*handle).handle = handle;
+
+          }
+
+          // new id for new CT nodes
+          ++id;
+        }
+      }
+
+      return false;
+    }
+  };
 
 }  // namespace libMultiRobotPlanning
