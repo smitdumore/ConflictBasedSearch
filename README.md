@@ -20,7 +20,7 @@ python3 visualize.py maps/map_experiment.yaml /home/smit/catkin_ws/src/cbs/build
 ```
 ./interactive_cbs.py maps/map_7by7_obst_agents6.yaml
 ```
-
+![image](output/tree.png)
 
 # References :
 1. https://github.com/whoenig/libMultiRobotPlanning./run_cbs -i ../map_5by5_obst_agents2.yaml -o output.yaml
