@@ -9,7 +9,7 @@
 ```
 cd build
 ./run_cbs -i ../maps/map_experiment.yaml -o output.yaml #deprecated
-
+./run_app
 ```
 ./interactive_cbs.py maps/map_7by7_obst_agents6.yaml
 ```

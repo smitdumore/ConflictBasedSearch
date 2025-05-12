@@ -7,7 +7,7 @@
 
 int main(int argc, char *argv[]) {
 
-    std::string mapPath = "../maps/corridor_test.yaml";
+    std::string mapPath = "../maps/map_10by10_slack_agents3.yaml";
     std::cout << "Starting CBS simulation with map: " << mapPath << std::endl;
 
     Controller ctrl;
