@@ -83,7 +83,7 @@ bool Simulator::isWindowOpen() const {
     return window_.isOpen();
 }
 
-void Simulator::render(const std::vector<PlanResult<State, Action, int>>& solution, int timestep, double alpha) {
+void Simulator::render(const std::vector<PlanResult<State, Action, int>>& solution, int timestep, double alpha, float opacity) {
     if (!window_.isOpen()) return;
     
     window_.clear(sf::Color(240, 240, 240)); // Light gray background
@@ -98,10 +98,10 @@ void Simulator::render(const std::vector<PlanResult<State, Action, int>>& soluti
     drawGoals();
     
     // Draw paths first (so they appear underneath the agents)
-    drawPaths(solution);
+    drawPaths(solution, opacity);
     
     // Draw agents
-    drawAgents(solution, timestep, alpha);
+    drawAgents(solution, timestep, alpha, opacity);
     
     // Draw UI overlay
     drawUI(timestep);
@@ -253,14 +253,14 @@ void Simulator::drawGoals() {
     }
 }
 
-void Simulator::drawPaths(const std::vector<PlanResult<State, Action, int>>& solution) {
+void Simulator::drawPaths(const std::vector<PlanResult<State, Action, int>>& solution, float opacity) {
     for (size_t i = 0; i < solution.size(); ++i) {
         const auto& states = solution[i].states;
         if (states.empty()) continue; // Skip if no states
         
         // Get agent color but make it slightly transparent
         sf::Color pathColor = i < agentColors_.size() ? agentColors_[i] : sf::Color::Red;
-        pathColor.a = 180; // Semi-transparent
+        pathColor.a = static_cast<sf::Uint8>(180 * opacity); // Apply opacity
         
         if (states.size() >= 2) {
             // Create a vertex array for the path line with thicker line
@@ -395,94 +395,145 @@ void Simulator::drawPaths(const std::vector<PlanResult<State, Action, int>>& sol
     }
 }
 
-void Simulator::drawAgents(const std::vector<PlanResult<State, Action, int>>& solution, int timestep, double alpha) {
-    sf::CircleShape agentShape;
-    agentShape.setRadius(cellSize_ / 3.0f);
-    
+void Simulator::drawAgents(const std::vector<PlanResult<State, Action, int>>& solution, int timestep, double alpha, float opacity) {
+    // Draw each agent
     for (size_t i = 0; i < solution.size(); ++i) {
-        // Check if this is timestep 0 and we should use the agent's start position
-        // instead of the solution position
-        sf::Vector2f position;
+        // Find current and next states
+        State currentState = findStateAtTime(solution, i, timestep);
+        State nextState = findStateAtTime(solution, i, timestep + 1);
         
-        if (timestep == 0 && i < agentStarts_.size()) {
-            // At timestep 0, use the possibly updated start position
-            const auto& start = agentStarts_[i];
-            position = worldToScreen(start.x, start.y);
-        } else {
-            // For other timesteps, use the original solution (interpolated)
-            State currentState = findStateAtTime(solution, i, timestep);
-            State nextState = findStateAtTime(solution, i, timestep + 1);
-            
-            // Interpolate between current and next position
-            if (currentState.x == nextState.x && currentState.y == nextState.y) {
-                position = worldToScreen(currentState.x, currentState.y);
-            } else {
-                position = sf::Vector2f(
-                    (currentState.x * (1.0f - alpha) + nextState.x * alpha) * cellSize_,
-                    (currentState.y * (1.0f - alpha) + nextState.y * alpha) * cellSize_
-                );
-            }
+        // Skip if agent has no valid position
+        if (currentState.x < 0 || currentState.y < 0) {
+            continue;
         }
         
-        // Set color and position
+        // Interpolate position based on alpha
+        sf::Vector2f position;
+        if (nextState.x >= 0 && nextState.y >= 0 && alpha > 0) {
+            position = interpolatePosition(currentState, nextState, alpha);
+        } else {
+            position = worldToScreen(currentState.x, currentState.y);
+        }
+        
+        // Add cell center offset
+        position.x += cellSize_ / 2.0f;
+        position.y += cellSize_ / 2.0f;
+        
+        // Create agent circle
+        sf::CircleShape agentShape;
+        agentShape.setRadius(cellSize_ / 3.0f);
+        
+        // Use agent color or default to red
         sf::Color agentColor = i < agentColors_.size() ? agentColors_[i] : sf::Color::Red;
+        
+        // Apply opacity
+        agentColor.a = static_cast<sf::Uint8>(255 * opacity);
+        
         agentShape.setFillColor(agentColor);
+        agentShape.setOutlineThickness(2);
+        agentShape.setOutlineColor(sf::Color(0, 0, 0, static_cast<sf::Uint8>(255 * opacity))); // Black outline with opacity
+        
+        // Position centered on interpolated position
         agentShape.setPosition(
-            position.x + cellSize_/2.0f - agentShape.getRadius(),
-            position.y + cellSize_/2.0f - agentShape.getRadius()
+            position.x - agentShape.getRadius(),
+            position.y - agentShape.getRadius()
         );
         
-        // Draw agent number
+        // Draw the agent
         window_.draw(agentShape);
         
-        if (font_.getInfo().family != "") {
-            sf::Text text;
-            text.setFont(font_);
-            text.setString(std::to_string(i));
-            text.setCharacterSize(cellSize_ / 3);
-            text.setFillColor(sf::Color::White);
-            
-            // Center text on agent
-            sf::FloatRect textBounds = text.getLocalBounds();
-            text.setPosition(
-                position.x + cellSize_/2.0f - textBounds.width/2.0f,
-                position.y + cellSize_/2.0f - textBounds.height
-            );
-            
-            window_.draw(text);
-        }
+        // Draw agent ID text
+        sf::Text idText;
+        idText.setFont(font_);
+        idText.setString(std::to_string(i));
+        idText.setCharacterSize(22); // Larger size
+        idText.setFillColor(sf::Color(255, 255, 255, static_cast<sf::Uint8>(255 * opacity))); // White text with opacity
+        idText.setOutlineColor(sf::Color(0, 0, 0, static_cast<sf::Uint8>(255 * opacity))); // Black outline with opacity
+        idText.setOutlineThickness(2); // Thicker outline for better visibility
+        idText.setStyle(sf::Text::Bold);
+        
+        // Center text in agent
+        sf::FloatRect textBounds = idText.getLocalBounds();
+        idText.setOrigin(textBounds.width / 2.0f, textBounds.height / 2.0f);
+        idText.setPosition(position.x, position.y);
+        
+        // Draw the ID
+        window_.draw(idText);
     }
 }
 
 void Simulator::drawUI(int timestep) {
-    if (font_.getInfo().family == "") return;
-    
-    sf::Text text;
-    text.setFont(font_);
-    text.setCharacterSize(20);
-    text.setFillColor(sf::Color::Black);
-    text.setPosition(10, 10);
-    text.setString("Timestep: " + std::to_string(timestep));
-    
-    window_.draw(text);
+    // Removed timestep display
 }
 
 void Simulator::drawMessage() {
     if (messageTimeRemaining_ <= 0 || font_.getInfo().family == "") return;
     
+    // Create background panel
+    sf::RectangleShape msgBackground;
+    msgBackground.setSize(sf::Vector2f(window_.getSize().x * 0.8f, 60));
+    msgBackground.setFillColor(sf::Color(0, 0, 0, 220)); // Semi-transparent black
+    msgBackground.setOutlineColor(sf::Color(255, 215, 0)); // Gold outline
+    msgBackground.setOutlineThickness(3.0f);
+    
+    // Position the background at the bottom of the screen
+    msgBackground.setPosition(
+        window_.getSize().x * 0.1f,
+        window_.getSize().y - 80
+    );
+    
+    // Create the message text
     sf::Text text;
     text.setFont(font_);
     text.setString(message_);
-    text.setCharacterSize(24);
-    text.setFillColor(sf::Color::Red);
+    text.setStyle(sf::Text::Bold);
     
-    // Center text at bottom of screen
+    // Start with a large size and reduce it if needed
+    int charSize = 28;
+    text.setCharacterSize(charSize);
+    
+    // Check if text is too wide for the background and resize if needed
     sf::FloatRect textBounds = text.getLocalBounds();
+    float maxWidth = msgBackground.getSize().x - 20.0f; // Leave 10px padding on each side
+    
+    // Reduce text size until it fits or reaches minimum size
+    while (textBounds.width > maxWidth && charSize > 14) {
+        charSize -= 2;
+        text.setCharacterSize(charSize);
+        textBounds = text.getLocalBounds();
+    }
+    
+    // If still too big, truncate with ellipsis
+    if (textBounds.width > maxWidth) {
+        std::string truncated = message_;
+        while (textBounds.width > maxWidth && truncated.length() > 3) {
+            truncated = truncated.substr(0, truncated.length() - 4) + "...";
+            text.setString(truncated);
+            textBounds = text.getLocalBounds();
+        }
+    }
+    
+    // Vibrant color with glow effect (using outline)
+    text.setFillColor(sf::Color(255, 255, 255)); // Bright white
+    text.setOutlineColor(sf::Color(255, 90, 0)); // Orange glow
+    text.setOutlineThickness(2.0f);
+    
+    // Center text on the background
+    textBounds = text.getLocalBounds(); // Recalculate after potential changes
     text.setPosition(
         window_.getSize().x / 2.0f - textBounds.width / 2.0f,
-        window_.getSize().y - 50
+        window_.getSize().y - 80 + (60 - textBounds.height) / 2.0f - 5
     );
     
+    // Draw with a slight shadow effect
+    sf::Text shadowText = text;
+    shadowText.setFillColor(sf::Color(0, 0, 0, 150));
+    shadowText.setOutlineThickness(0);
+    shadowText.setPosition(text.getPosition() + sf::Vector2f(3, 3));
+    
+    // Draw the elements
+    window_.draw(msgBackground);
+    window_.draw(shadowText);
     window_.draw(text);
 }
 
@@ -568,4 +619,22 @@ void Simulator::drawDraggedAgent(int agentIdx, int x, int y) {
     
     // We need to display immediately to avoid flicker
     display();
+}
+
+sf::Vector2f Simulator::interpolatePosition(const State& start, const State& end, double alpha) const {
+    // If states are the same, no need to interpolate
+    if (start.x == end.x && start.y == end.y) {
+        return worldToScreen(start.x, start.y);
+    }
+    
+    // Interpolate between start and end positions
+    float x = start.x * (1.0f - alpha) + end.x * alpha;
+    float y = start.y * (1.0f - alpha) + end.y * alpha;
+    
+    return worldToScreen(x, y);
+}
+
+void Simulator::clear() {
+    if (!window_.isOpen()) return;
+    window_.clear(sf::Color(240, 240, 240)); // Light gray background
 }

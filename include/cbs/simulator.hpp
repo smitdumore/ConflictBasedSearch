@@ -32,7 +32,7 @@ public:
     // Rendering methods
     void clear();
     void render(const std::vector<PlanResult<State, Action, int>>& solution, 
-                int currentTimestep, double interpolationAlpha);
+                int currentTimestep, double interpolationAlpha, float opacity = 1.0f);
     void display();
     
     // Mouse interaction
@@ -65,8 +65,8 @@ private:
     void drawObstacles();
     void drawGoals();
     void drawAgents(const std::vector<PlanResult<State, Action, int>>& solution, 
-                   int currentTimestep, double interpolationAlpha);
-    void drawPaths(const std::vector<PlanResult<State, Action, int>>& solution);
+                   int currentTimestep, double interpolationAlpha, float opacity = 1.0f);
+    void drawPaths(const std::vector<PlanResult<State, Action, int>>& solution, float opacity = 1.0f);
     void drawUI(int currentTimestep);
     void drawMessage();
     sf::Color generateRandomColor() const;

@@ -6,7 +6,7 @@
 #include <yaml-cpp/yaml.h>
 
 Controller::Controller()
-    : running_(false), paused_(false), initialized_(false), timeMultiplier_(0.5f), secondsPerTimestep_(1.0f),
+    : running_(false), paused_(false), initialized_(false), timeMultiplier_(0.5f), secondsPerTimestep_(0.5f),
       timeAccumulator_(0.0f), currentTimestep_(0), interpolationAlpha_(0.1f), maxTimestep_(0),
       dimX_(0), dimY_(0), draggedAgentIdx_(-1), isDragging_(false), defaultSpaceSlack_(2)
 {
@@ -71,7 +71,7 @@ bool Controller::loadMapFromYAML(const std::string& filename) {
 
         // Initialize slack for all agents
         agentSlack_.clear();
-        AllowableSlackTolerance = defaultSpaceSlack_ + 2;
+        AllowableSlackTolerance = defaultSpaceSlack_ + 1;
         agentSlack_.resize(starts_.size(), AllowableSlackTolerance);  // Use the default slack value
         
         // Initialize simulator and planner
@@ -233,14 +233,77 @@ bool Controller::update(float deltaTime) {
                                       << agentPositions[i].y << ") at timestep " 
                                       << currentTimestep_ << std::endl;
                             
-                            simulator_->showMessage("COLLISION DETECTED! Exiting...", 3.0f);
-                            simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+                            // Instead of exiting, let's replan
+                            simulator_->showMessage("⚠️ COLLISION DETECTED - REPLANNING ⚠️", 2.0f);
                             simulator_->display();
+                            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                             
-                            // Small delay to show the message before exiting
-                            std::this_thread::sleep_for(std::chrono::seconds(2));
-                            stop();
-                            return false;
+                            // Reset slack for all agents
+                            for (size_t k = 0; k < agentSlack_.size(); k++) {
+                                agentSlack_[k] = AllowableSlackTolerance;
+                            }
+                            
+                            // First, try to move one of the colliding agents to an adjacent safe cell
+                            State agent1State = getCurrentAgentPosition(i);
+                            State agent2State = getCurrentAgentPosition(j);
+                            
+                            // Attempt to find a safe position for agent i
+                            std::vector<State> adjacentPositions;
+                            // Check all 4 adjacent cells
+                            const int dx[4] = {0, 1, 0, -1};
+                            const int dy[4] = {1, 0, -1, 0};
+                            
+                            for (int d = 0; d < 4; d++) {
+                                int newX = agent1State.x + dx[d];
+                                int newY = agent1State.y + dy[d];
+                                
+                                // Check if this position is valid (not an obstacle and within map bounds)
+                                if (newX >= 0 && newX < dimX_ &&
+                                    newY >= 0 && newY < dimY_ &&
+                                    obstacles_.find(Location(newX, newY)) == obstacles_.end()) {
+                                    adjacentPositions.push_back(State(0, newX, newY));
+                                }
+                            }
+                            
+                            // Try each position and see if we can replan
+                            bool replanSuccessful = false;
+                            for (const auto& newPos : adjacentPositions) {
+                                if (replanFromCurrentStates(i, newPos)) {
+                                    replanSuccessful = true;
+                                    break;
+                                }
+                            }
+                            
+                            // If repositioning agent i didn't work, try with agent j
+                            if (!replanSuccessful) {
+                                adjacentPositions.clear();
+                                for (int d = 0; d < 4; d++) {
+                                    int newX = agent2State.x + dx[d];
+                                    int newY = agent2State.y + dy[d];
+                                    
+                                    // Check if this position is valid
+                                    if (newX >= 0 && newX < dimX_ &&
+                                        newY >= 0 && newY < dimY_ &&
+                                        obstacles_.find(Location(newX, newY)) == obstacles_.end()) {
+                                        adjacentPositions.push_back(State(0, newX, newY));
+                                    }
+                                }
+                                
+                                for (const auto& newPos : adjacentPositions) {
+                                    if (replanFromCurrentStates(j, newPos)) {
+                                        replanSuccessful = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // If we couldn't replan successfully with any of the adjacent positions
+                            if (!replanSuccessful) {
+                                std::cerr << "Could not find a valid replan after collision!" << std::endl;
+                                simulator_->showMessage("Replanning failed! Please manually reposition agents.", 3.0f);
+                            }
+                            
+                            return true; // Continue simulation with the new plan or the same plan if replanning failed
                         }
                     }
                 }
@@ -382,14 +445,81 @@ bool Controller::computeInitialPlan() {
 }
 
 bool Controller::replanFromCurrentStates(int draggedAgentIdx, State newDraggedState) {
-    // This method has been simplified to just display a message
-    std::cout << "Replanning is disabled in this version." << std::endl;
-    
-    if (simulator_) {
-        simulator_->showMessage("Replanning is disabled in this version.", 3.0f);
+    // Collect all current agent positions
+    std::vector<State> currentPositions;
+    for (size_t i = 0; i < solution_.size(); i++) {
+        if (i == static_cast<size_t>(draggedAgentIdx)) {
+            currentPositions.push_back(newDraggedState);
+        } else {
+            currentPositions.push_back(getCurrentAgentPosition(i));
+        }
     }
     
-    return false;
+    // Update all agents' start positions
+    for (size_t i = 0; i < currentPositions.size(); i++) {
+        starts_[i].time = 0;
+        starts_[i].x = currentPositions[i].x;
+        starts_[i].y = currentPositions[i].y;
+    }
+    
+    // Validate the positions
+    if (!validateAgentPositions(starts_)) {
+        std::cerr << "Invalid agent positions for replanning!" << std::endl;
+        simulator_->showMessage("Invalid positions for replanning!", 3.0f);
+        return false;
+    }
+    
+    // Store the old solution for smooth transition
+    auto oldSolution = solution_;
+    
+    // Compute a new plan
+    std::cout << "Computing new plan from current positions..." << std::endl;
+    simulator_->showMessage("🔄 REPLANNING... 🔄", 2.0f);
+    simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+    simulator_->display();
+    
+    if (!computeInitialPlan()) {
+        std::cerr << "Failed to replan from current positions!" << std::endl;
+        simulator_->showMessage("❌ REPLAN FAILED ❌", 3.0f);
+        return false;
+    }
+    
+    // Create a smooth transition from old plan to new plan
+    std::cout << "Creating smooth transition between plans..." << std::endl;
+    
+    // Animate the transition
+    const int transitionSteps = 20;
+    for (int step = 0; step <= transitionSteps; step++) {
+        float alpha = static_cast<float>(step) / transitionSteps;
+        
+        // Clear the screen and draw the background
+        simulator_->clear();
+        
+        // Render the old solution with decreasing opacity
+        simulator_->render(oldSolution, currentTimestep_, interpolationAlpha_, 1.0f - alpha);
+        
+        // Render the new solution with increasing opacity
+        simulator_->render(solution_, 0, 0.0f, alpha);
+        
+        // Show the transition message
+        simulator_->showMessage("⟳ TRANSITIONING ⟳", 1.0f);
+        
+        // Display the result
+        simulator_->display();
+        
+        // Short delay for smooth transition
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    
+    // Reset simulation to timestep 0
+    currentTimestep_ = 0;
+    timeAccumulator_ = 0.0f;
+    interpolationAlpha_ = 0.0f;
+    
+    std::cout << "Replanning successful!" << std::endl;
+    simulator_->showMessage("✅ REPLAN SUCCESS ✅", 2.0f);
+    
+    return true;
 }
 
 State Controller::getCurrentAgentPosition(size_t agentIdx) const {
@@ -534,15 +664,105 @@ void Controller::processEvents() {
                             
                             // Check if agent has run out of slack
                             if (agentSlack_[draggedAgentIdx_] <= 0) {
-                                std::cout << "AGENT " << draggedAgentIdx_ << " OUT OF SLACK! Exiting..." << std::endl;
-                                simulator_->showMessage("Agent " + std::to_string(draggedAgentIdx_) + 
-                                                      " out of slack! Exiting...", 3.0f);
+                                std::cout << "AGENT " << draggedAgentIdx_ << " OUT OF SLACK! Replanning..." << std::endl;
+                                simulator_->showMessage("⚠️ AGENT " + std::to_string(draggedAgentIdx_) + 
+                                                      " OUT OF SLACK ⚠️", 3.0f);
                                 simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
                                 simulator_->display();
                                 
-                                // Small delay to show the message before exiting
-                                std::this_thread::sleep_for(std::chrono::seconds(2));
-                                stop();
+                                // Small delay to show the message before replanning
+                                std::this_thread::sleep_for(std::chrono::seconds(1));
+                                
+                                // Important: Use the dropped position for the dragged agent
+                                // and reset slack for all agents
+                                agentSlack_.clear();
+                                agentSlack_.resize(starts_.size(), AllowableSlackTolerance);
+                                
+                                // Store the old solution for smooth transition
+                                auto oldSolution = solution_;
+                                
+                                // For the dragged agent, use the position where it was dropped
+                                // and for other agents, use their current positions
+                                std::vector<State> currentPositions;
+                                for (size_t i = 0; i < solution_.size(); i++) {
+                                    if (i == static_cast<size_t>(draggedAgentIdx_)) {
+                                        // Use the dropped position for the dragged agent
+                                        // (which is already updated in starts_[draggedAgentIdx_])
+                                        currentPositions.push_back(starts_[draggedAgentIdx_]);
+                                    } else {
+                                        // Use current positions for other agents
+                                        currentPositions.push_back(getCurrentAgentPosition(i));
+                                    }
+                                }
+                                
+                                // Update all agents' start positions
+                                for (size_t i = 0; i < currentPositions.size(); i++) {
+                                    starts_[i].time = 0;
+                                    starts_[i].x = currentPositions[i].x;
+                                    starts_[i].y = currentPositions[i].y;
+                                }
+                                
+                                // Validate the positions
+                                if (!validateAgentPositions(starts_)) {
+                                    std::cerr << "Invalid agent positions for replanning!" << std::endl;
+                                    simulator_->showMessage("Invalid positions for replanning! Exiting...", 3.0f);
+                                    simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+                                    simulator_->display();
+                                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                                    stop();
+                                    return;
+                                }
+                                
+                                // Compute a new plan from current positions
+                                std::cout << "Computing new plan from current positions..." << std::endl;
+                                if (!computeInitialPlan()) {
+                                    std::cerr << "Failed to replan from current positions!" << std::endl;
+                                    simulator_->showMessage("Replanning failed! Exiting...", 3.0f);
+                                    simulator_->render(solution_, currentTimestep_, interpolationAlpha_);
+                                    simulator_->display();
+                                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                                    stop();
+                                    return;
+                                }
+                                
+                                // Create a smooth transition from old plan to new plan
+                                std::cout << "Creating smooth transition between plans..." << std::endl;
+                                
+                                // Animate the transition
+                                const int transitionSteps = 20;
+                                for (int step = 0; step <= transitionSteps; step++) {
+                                    float alpha = static_cast<float>(step) / transitionSteps;
+                                    
+                                    // Clear the screen and draw the background
+                                    simulator_->clear();
+                                    
+                                    // Render the old solution with decreasing opacity
+                                    simulator_->render(oldSolution, currentTimestep_, interpolationAlpha_, 1.0f - alpha);
+                                    
+                                    // Render the new solution with increasing opacity
+                                    simulator_->render(solution_, 0, 0.0f, alpha);
+                                    
+                                    // Show the transition message
+                                    simulator_->showMessage("⟳ TRANSITIONING ⟳", 1.0f);
+                                    
+                                    // Display the result
+                                    simulator_->display();
+                                    
+                                    // Short delay for smooth transition
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                                }
+                                
+                                // Reset simulation to timestep 0
+                                currentTimestep_ = 0;
+                                timeAccumulator_ = 0.0f;
+                                interpolationAlpha_ = 0.0f;
+                                
+                                std::cout << "Replanning successful! Resuming simulation..." << std::endl;
+                                simulator_->showMessage("Replanning successful!", 2.0f);
+                                
+                                // Resume simulation
+                                paused_ = false;
+                                
                                 return;
                             }
                             
